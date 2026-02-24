@@ -27,6 +27,9 @@ credentials.json
 *.tsbuildinfo
 .wrangler/
 **/.wrangler/
+__pycache__/
+*.pyc
+services/control-plane/data/
 
 # misc
 .DS_Store
