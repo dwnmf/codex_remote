@@ -40,39 +40,46 @@
   </AppHeader>
 
   <main class="sessions-content stack">
-    <div class="section-header split">
-      <div class="section-title-row row">
-        <span class="section-title">All Sessions</span>
-      </div>
-      <div class="section-actions row">
-        <button class="refresh-btn" onclick={() => threads.fetch()} title="Refresh">↻</button>
-      </div>
-    </div>
+    <section class="masthead">
+      <span class="section-title">All sessions</span>
+      <h1>Sessions</h1>
+    </section>
 
-    {#if threads.loading}
-      <div class="loading row">
-        <ShimmerDot /> Loading sessions...
+    <section class="workspace stack">
+      <div class="section-header split">
+        <div class="section-title-row row">
+          <span class="section-subtitle">History</span>
+        </div>
+        <div class="section-actions row">
+          <button class="refresh-btn" onclick={() => threads.fetch()} title="Refresh">↻</button>
+        </div>
       </div>
-    {:else if threads.list.length === 0}
-      <div class="empty row">No sessions yet. Start one from Home.</div>
-    {:else}
-      <ul class="session-list">
-        {#each threads.list as thread (thread.id)}
-          <li class="session-item row">
-            <a class="session-link row" href="/thread/{thread.id}">
-              <span class="session-icon">›</span>
-              <span class="session-preview">{thread.preview || "New session"}</span>
-              <span class="session-meta">{formatTime(thread.createdAt)}</span>
-            </a>
-            <button
-              class="archive-btn"
-              onclick={() => threads.archive(thread.id)}
-              title="Archive session"
-            >×</button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
+
+      {#if threads.loading}
+        <div class="loading row">
+          <ShimmerDot /> Loading sessions...
+        </div>
+      {:else if threads.list.length === 0}
+        <div class="empty row">No sessions yet. Start one from Home.</div>
+      {:else}
+        <ul class="session-list">
+          {#each threads.list as thread (thread.id)}
+            <li class="session-item row">
+              <a class="session-link row" href="/thread/{thread.id}">
+                <span class="session-icon">›</span>
+                <span class="session-preview">{thread.preview || "New session"}</span>
+                <span class="session-meta">{formatTime(thread.createdAt)}</span>
+              </a>
+              <button
+                class="archive-btn"
+                onclick={() => threads.archive(thread.id)}
+                title="Archive session"
+              >×</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
   </main>
 </div>
 
@@ -88,18 +95,41 @@
 
   .sessions-content {
     width: 100%;
-    max-width: var(--app-max-width);
+    max-width: min(1480px, calc(100vw - var(--space-lg) * 2));
     margin: 0 auto;
-    padding: var(--space-lg) var(--space-md) var(--space-xl);
+    padding: var(--space-md) var(--space-lg) var(--space-xl);
+    --stack-gap: var(--space-lg);
+  }
+
+  .masthead {
+    display: grid;
+    gap: var(--space-xs);
+    padding: 0 var(--space-xs);
+  }
+
+  .masthead h1 {
+    margin: 0;
+    font-size: clamp(4.1rem, 16vw, 11rem);
+    line-height: 0.82;
+    letter-spacing: -0.05em;
+    font-weight: 600;
+    color: var(--cli-text);
+  }
+
+  .workspace {
     --stack-gap: var(--space-sm);
+    padding: var(--space-md);
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-lg);
+    background: var(--cli-bg-elevated);
   }
 
   .section-header {
     --split-gap: var(--space-sm);
-    padding: var(--space-sm);
+    padding: 0.58rem 0.7rem;
     border: 1px solid var(--cli-border);
-    border-radius: var(--radius-sm);
-    background: var(--cli-bg-elevated);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--cli-bg) 66%, transparent);
   }
 
   .section-title-row {
@@ -112,18 +142,29 @@
   }
 
   .section-title {
+    color: var(--cli-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .section-subtitle {
     color: var(--cli-text-dim);
     font-size: var(--text-xs);
     letter-spacing: 0.05em;
     text-transform: uppercase;
+    font-family: var(--font-mono);
+    font-weight: 600;
   }
 
   .refresh-btn {
-    padding: var(--space-xs);
-    border: none;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-md);
     background: transparent;
     color: var(--cli-text-muted);
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
     cursor: pointer;
   }
 
@@ -136,7 +177,7 @@
     margin: 0;
     padding: 0;
     border: 1px solid var(--cli-border);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     overflow: hidden;
   }
 
@@ -202,7 +243,17 @@
     color: var(--cli-text-muted);
     padding: var(--space-md);
     border: 1px solid var(--cli-border);
-    border-radius: var(--radius-sm);
-    background: var(--cli-bg-elevated);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--cli-bg) 66%, transparent);
+  }
+
+  @media (max-width: 900px) {
+    .sessions-content {
+      padding: var(--space-md);
+    }
+
+    .masthead h1 {
+      font-size: clamp(3.2rem, 20vw, 6rem);
+    }
   }
 </style>

@@ -25,6 +25,7 @@
 </svelte:head>
 
 <AuthPageLayout>
+  <span class="eyebrow">Register</span>
   <h1>Create account</h1>
   <p class="subtitle">
     {authMode === "basic" ? "Create a username for this control-plane." : "Register a new account with a passkey."}
@@ -55,26 +56,39 @@
 </AuthPageLayout>
 
 <style>
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--cli-text-muted);
+  }
+
   h1 {
     margin: 0;
-    font-size: clamp(1.5rem, 3vw, 2rem);
+    font-size: clamp(2.4rem, 5vw, 3.8rem);
+    line-height: 0.88;
+    letter-spacing: -0.05em;
   }
 
   .subtitle {
     margin: 0;
     color: var(--cli-text-dim);
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     line-height: 1.5;
+    max-width: 32ch;
   }
 
   .auth-input {
-    padding: var(--space-sm) var(--space-md);
-    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.74rem;
+    border-radius: var(--radius-md);
     border: 1px solid var(--cli-border);
     background: var(--cli-bg);
     color: var(--cli-text);
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
     outline: none;
   }
 
@@ -83,18 +97,24 @@
   }
 
   .auth-error {
-    padding: var(--space-sm);
-    border-radius: var(--radius-sm);
+    padding: 0.62rem 0.72rem;
+    border-radius: var(--radius-md);
     background: var(--cli-error-bg);
+    border: 1px solid color-mix(in srgb, var(--cli-error) 46%, transparent);
     color: var(--cli-error);
-    font-size: var(--text-sm);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: 0.01em;
   }
 
   .primary-btn {
-    padding: var(--space-sm) var(--space-md);
-    border-radius: var(--radius-sm);
+    padding: 0.58rem 0.72rem;
+    border-radius: var(--radius-md);
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
     line-height: 1;
     cursor: pointer;
     border: 1px solid var(--cli-border);
@@ -115,8 +135,11 @@
     align-self: flex-start;
     color: var(--cli-text-dim);
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    text-decoration: underline;
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--cli-text-muted) 60%, transparent);
   }
 
   .link-btn:hover {

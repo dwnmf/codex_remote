@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Archivo+Black&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Sora:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap");
 @import "./lib/styles/tokens.css";
 @import "./lib/styles/layout.css";
 
@@ -17,6 +17,8 @@ body {
   transition:
     background var(--transition-fast),
     color var(--transition-fast);
+  letter-spacing: 0.002em;
+  text-rendering: geometricPrecision;
 }
 
 #app {
@@ -30,8 +32,9 @@ h4,
 h5,
 h6 {
   font-family: var(--font-display);
-  letter-spacing: -0.02em;
-  line-height: 1.05;
+  letter-spacing: -0.03em;
+  line-height: 0.96;
+  font-weight: 600;
 }
 
 body::before {
@@ -39,21 +42,21 @@ body::before {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  opacity: 0.2;
+  opacity: 0.38;
   background:
     repeating-linear-gradient(
       0deg,
       transparent 0,
-      transparent 39px,
-      color-mix(in srgb, var(--cli-border) 20%, transparent) 39px,
-      color-mix(in srgb, var(--cli-border) 20%, transparent) 40px
+      transparent 45px,
+      color-mix(in srgb, var(--cli-border) 34%, transparent) 45px,
+      color-mix(in srgb, var(--cli-border) 34%, transparent) 46px
     ),
     repeating-linear-gradient(
       90deg,
       transparent 0,
-      transparent 39px,
-      color-mix(in srgb, var(--cli-border) 12%, transparent) 39px,
-      color-mix(in srgb, var(--cli-border) 12%, transparent) 40px
+      transparent 45px,
+      color-mix(in srgb, var(--cli-border) 18%, transparent) 45px,
+      color-mix(in srgb, var(--cli-border) 18%, transparent) 46px
     );
   z-index: 0;
 }
@@ -93,7 +96,7 @@ select {
 
 ::-webkit-scrollbar-thumb {
   background: var(--cli-border);
-  border-radius: 0;
+  border-radius: 1px;
 }
 
 ::-webkit-scrollbar-thumb:hover {

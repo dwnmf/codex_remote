@@ -170,17 +170,16 @@
   .input-card {
     --stack-gap: 0;
     width: 100%;
-    border: 2px solid var(--cli-border);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-lg);
     background: var(--cli-bg);
-    box-shadow: var(--shadow-sm);
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+    box-shadow: none;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   }
 
   .input-card:focus-within {
     border-color: var(--cli-prefix-agent);
     box-shadow: var(--shadow-focus);
-    transform: translate(-1px, -1px);
   }
 
   .input-card textarea {
@@ -192,11 +191,12 @@
     border: none;
     color: var(--cli-text);
     font-family: var(--font-sans);
-    font-size: 1.03rem;
+    font-size: 1.82rem;
     font-weight: 500;
     line-height: 1.5;
     resize: vertical;
-    min-height: 5.5rem;
+    min-height: 6.2rem;
+    letter-spacing: -0.015em;
   }
 
   .input-card textarea:focus {
@@ -214,8 +214,8 @@
 
   .input-footer {
     --split-gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-md);
-    border-top: 2px solid var(--cli-border);
+    padding: 0.58rem var(--space-md);
+    border-top: 1px solid var(--cli-border);
   }
 
   .tools {
@@ -224,24 +224,24 @@
 
   .tool-btn {
     --row-gap: var(--space-xs);
-    padding: var(--space-xs) var(--space-sm);
+    padding: 0.3rem 0.52rem;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     color: var(--cli-text-muted);
-    font-family: var(--font-sans);
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
-    font-weight: 700;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
     cursor: pointer;
     transition: all var(--transition-fast);
   }
 
   .tool-btn:hover {
-    background: var(--cli-bg-hover);
+    background: color-mix(in srgb, var(--cli-bg-hover) 70%, transparent);
     color: var(--cli-text);
-    border-color: var(--cli-border);
+    border-color: transparent;
   }
 
   .tool-btn svg {
@@ -263,12 +263,12 @@
 
   .submit-btn {
     justify-content: center;
-    width: 2rem;
-    height: 2rem;
+    width: 2.2rem;
+    height: 2.2rem;
     padding: 0;
     background: var(--cli-prefix-agent);
-    border: 2px solid var(--cli-border);
-    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
     cursor: pointer;
     transition: opacity var(--transition-fast);
     --row-gap: 0;
@@ -297,24 +297,28 @@
     align-items: center;
     gap: var(--space-xs);
     max-width: 16rem;
-    padding: var(--space-xs) var(--space-sm);
-    border: 2px solid var(--cli-border);
-    border-radius: var(--radius-sm);
+    padding: 0.34rem 0.58rem;
+    border: 0;
+    border-radius: var(--radius-md);
     background: transparent;
     color: var(--cli-text-muted);
-    font-family: var(--font-sans);
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
-    font-weight: 700;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
     cursor: pointer;
     transition: all var(--transition-fast);
+    border-bottom: 1px solid color-mix(in srgb, var(--cli-border) 55%, transparent);
+    border-top: 1px solid transparent;
+    border-left: 1px solid transparent;
+    border-right: 1px solid transparent;
   }
 
   .chip:hover {
     background: var(--cli-bg-hover);
     color: var(--cli-text);
-    border-color: var(--cli-text-muted);
+    border-bottom-color: var(--cli-text-muted);
   }
 
   .chip-icon {
@@ -339,11 +343,11 @@
     position: absolute;
     bottom: 100%;
     left: 0;
-    min-width: 140px;
+    min-width: 240px;
     margin-bottom: var(--space-xs);
-    padding: var(--space-xs);
+    padding: 0.3rem;
     background: var(--cli-bg-elevated);
-    border: 2px solid var(--cli-border);
+    border: 1px solid var(--cli-border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-popover);
     z-index: 100;
@@ -353,10 +357,10 @@
   .dropdown-item {
     --split-gap: var(--space-sm);
     width: 100%;
-    padding: var(--space-sm);
+    padding: 0.54rem 0.58rem;
     background: transparent;
     border: none;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     color: var(--cli-text);
     font-family: var(--font-mono);
     font-size: var(--text-xs);

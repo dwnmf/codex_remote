@@ -182,7 +182,7 @@
         width: 100vw;
         margin-left: calc(50% - 50vw);
         background: var(--cli-bg-elevated);
-        border-bottom: 2px solid var(--cli-border);
+        border-bottom: 1px solid var(--cli-border);
         font-family: var(--font-sans);
         font-size: var(--text-sm);
         color: var(--cli-text);
@@ -190,17 +190,17 @@
 
     .app-header-inner {
         --row-gap: var(--space-sm);
-        padding: var(--space-sm) var(--space-md);
+        padding: 0.62rem var(--space-md);
         max-width: var(--app-max-width);
         margin: 0 auto;
     }
 
     .brand {
         font-family: var(--font-display);
-        font-size: 1rem;
-        font-weight: 400;
-        letter-spacing: 0.03em;
-        text-transform: uppercase;
+        font-size: 1.08rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        text-transform: none;
         color: var(--cli-prefix-agent);
         text-decoration: none;
         transition: opacity var(--transition-fast);
@@ -231,9 +231,9 @@
     }
 
     .anchor-alert {
-        padding: 0 var(--space-xs);
-        border-radius: var(--radius-sm);
-        border: 2px solid var(--cli-warning);
+        padding: 0.1rem 0.42rem;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--cli-warning);
         color: var(--cli-warning);
         font-size: var(--text-xs);
         text-transform: uppercase;
@@ -265,10 +265,10 @@
 
     .sandbox-btn {
         --row-gap: var(--space-xs);
-        padding: var(--space-xs) var(--space-sm);
+        padding: 0.34rem 0.5rem;
         background: transparent;
-        border: 2px solid var(--cli-border);
-        border-radius: var(--radius-sm);
+        border: 1px solid var(--cli-border);
+        border-radius: var(--radius-md);
         color: var(--cli-text-dim);
         font-family: var(--font-mono);
         font-size: var(--text-xs);
@@ -325,7 +325,7 @@
         margin-top: var(--space-xs);
         padding: var(--space-xs);
         background: var(--cli-bg-elevated);
-        border: 2px solid var(--cli-border);
+        border: 1px solid var(--cli-border);
         border-radius: var(--radius-md);
         box-shadow: var(--shadow-popover);
         z-index: 100;
@@ -391,14 +391,14 @@
     .desktop-actions :global(a),
     .desktop-actions :global(button) {
         padding: var(--space-xs) var(--space-sm);
-        border: 2px solid var(--cli-border);
-        border-radius: var(--radius-sm);
+        border: 1px solid var(--cli-border);
+        border-radius: var(--radius-md);
         background: transparent;
         color: var(--cli-text-dim);
-        font-family: var(--font-sans);
+        font-family: var(--font-mono);
         font-size: var(--text-xs);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.02em;
         text-decoration: none;
         cursor: pointer;
         transition: all var(--transition-fast);
@@ -418,8 +418,8 @@
         height: 2rem;
         padding: 0;
         background: transparent;
-        border: 2px solid var(--cli-border);
-        border-radius: var(--radius-sm);
+        border: 1px solid var(--cli-border);
+        border-radius: var(--radius-md);
         color: var(--cli-text-dim);
         cursor: pointer;
         transition: all var(--transition-fast);

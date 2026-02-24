@@ -260,7 +260,7 @@
 
   .input-container {
     --stack-gap: 0;
-    border: 2px solid var(--cli-border);
+    border: 1px solid var(--cli-border);
     border-radius: var(--radius-md);
     background: var(--cli-bg);
     box-shadow: var(--shadow-sm);
@@ -305,7 +305,7 @@
   .footer {
     --split-gap: var(--space-sm);
     padding: var(--space-sm) var(--space-md);
-    border-top: 2px solid var(--cli-border);
+    border-top: 1px solid var(--cli-border);
   }
 
   .tools {
@@ -365,7 +365,7 @@
     margin-bottom: var(--space-xs);
     padding: var(--space-xs);
     background: var(--cli-bg-elevated);
-    border: 2px solid var(--cli-border);
+    border: 1px solid var(--cli-border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-popover);
     z-index: 100;
@@ -432,7 +432,7 @@
     height: 2rem;
     padding: 0;
     background: var(--cli-prefix-agent);
-    border: 2px solid var(--cli-border);
+    border: 1px solid var(--cli-border);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: opacity var(--transition-fast);
@@ -460,7 +460,7 @@
     height: 2rem;
     padding: 0;
     background: var(--cli-error);
-    border: 2px solid var(--cli-border);
+    border: 1px solid var(--cli-border);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: opacity var(--transition-fast);

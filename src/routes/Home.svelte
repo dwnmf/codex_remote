@@ -226,68 +226,70 @@
 
   <main class="hero">
     <div class="hero-content">
-      <section class="pane-toolbar split">
-        <div class="pane-count row">
-          <span>Input windows</span>
-          {#each PANE_COUNT_OPTIONS as count}
-            <button
-              type="button"
-              class="count-btn"
-              class:active={paneCount === count}
-              onclick={() => {
-                paneCount = count;
-              }}
-            >
-              {count}
-            </button>
-          {/each}
-        </div>
-        <span class="pane-hint">Each window has its own project, mode and model.</span>
-      </section>
-
-      <section class="pane-grid">
-        {#each visiblePanes as pane (pane.id)}
-          <div class="pane stack">
-            <div class="pane-title split">
-              <span>Window {pane.id}</span>
-              {#if pane.isCreating}
-                <span class="pane-status">Starting...</span>
-              {/if}
-            </div>
-
-            {#if pane.submitError}
-              <div class="error pane-error row">
-                <span class="error-icon">!</span>
-                <span class="error-text">{pane.submitError}</span>
-              </div>
-            {/if}
-
-            <HomeTaskComposer
-              task={pane.task}
-              mode={pane.mode}
-              isCreating={pane.isCreating}
-              canSubmit={canSubmit(pane)}
-              worktreeDisplay={worktreeLabelFor(pane.project)}
-              currentModelLabel={modelLabelFor(pane)}
-              modelsStatus={models.status}
-              modelOptions={models.options}
-              selectedModel={pane.selectedModel}
-              on:taskChange={(e) => handleTaskChange(pane.id, e.detail.value)}
-              on:toggleMode={() => handleToggleMode(pane.id)}
-              on:openWorktrees={() => handleOpenWorktrees(pane.id)}
-              on:selectModel={(e) => handleSelectModel(pane.id, e.detail.value)}
-              on:submit={() => handleSubmit(pane.id)}
-            />
+      <section class="workspace stack">
+        <section class="pane-toolbar split">
+          <div class="pane-count row">
+            <span>Input windows</span>
+            {#each PANE_COUNT_OPTIONS as count}
+              <button
+                type="button"
+                class="count-btn"
+                class:active={paneCount === count}
+                onclick={() => {
+                  paneCount = count;
+                }}
+              >
+                {count}
+              </button>
+            {/each}
           </div>
-        {/each}
-      </section>
+          <span class="pane-hint">Each window has its own project, mode and model.</span>
+        </section>
 
-      <RecentSessionsList
-        loading={threads.loading}
-        {recentThreads}
-        {hasMoreThreads}
-        on:refresh={() => threads.fetch()}
-      />
+        <section class="pane-grid">
+          {#each visiblePanes as pane (pane.id)}
+            <div class="pane stack">
+              <div class="pane-title split">
+                <span>Window {pane.id}</span>
+                {#if pane.isCreating}
+                  <span class="pane-status">Starting...</span>
+                {/if}
+              </div>
+
+              {#if pane.submitError}
+                <div class="error pane-error row">
+                  <span class="error-icon">!</span>
+                  <span class="error-text">{pane.submitError}</span>
+                </div>
+              {/if}
+
+              <HomeTaskComposer
+                task={pane.task}
+                mode={pane.mode}
+                isCreating={pane.isCreating}
+                canSubmit={canSubmit(pane)}
+                worktreeDisplay={worktreeLabelFor(pane.project)}
+                currentModelLabel={modelLabelFor(pane)}
+                modelsStatus={models.status}
+                modelOptions={models.options}
+                selectedModel={pane.selectedModel}
+                on:taskChange={(e) => handleTaskChange(pane.id, e.detail.value)}
+                on:toggleMode={() => handleToggleMode(pane.id)}
+                on:openWorktrees={() => handleOpenWorktrees(pane.id)}
+                on:selectModel={(e) => handleSelectModel(pane.id, e.detail.value)}
+                on:submit={() => handleSubmit(pane.id)}
+              />
+            </div>
+          {/each}
+        </section>
+
+        <RecentSessionsList
+          loading={threads.loading}
+          {recentThreads}
+          {hasMoreThreads}
+          on:refresh={() => threads.fetch()}
+        />
+      </section>
     </div>
   </main>
 </div>
@@ -314,29 +316,38 @@
 
   .hero {
     display: flex;
-    align-items: flex-start;
+    align-items: stretch;
     justify-content: center;
     min-height: calc(100vh - 3rem);
-    padding: var(--space-md);
+    padding: var(--space-md) var(--space-lg);
   }
 
   .hero-content {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: var(--space-md);
+    gap: var(--space-sm);
     width: 100%;
-    max-width: min(1600px, calc(100vw - var(--space-md) * 2));
+    max-width: min(1480px, calc(100vw - var(--space-lg) * 2));
+  }
+
+  .workspace {
+    --stack-gap: var(--space-md);
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .pane-toolbar {
     --split-gap: var(--space-md);
     align-items: center;
-    padding: var(--space-sm) var(--space-md);
-    border: 2px solid var(--cli-border);
-    border-radius: var(--radius-md);
-    background: var(--cli-bg-elevated);
-    box-shadow: var(--shadow-sm);
+    padding: 0.35rem 0;
+    border: 1px solid var(--cli-border);
+    border-left: 0;
+    border-right: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .pane-count {
@@ -350,15 +361,15 @@
   }
 
   .count-btn {
-    border: 2px solid var(--cli-border);
+    border: 1px solid var(--cli-border);
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--cli-text-muted);
-    font-family: var(--font-sans);
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
-    font-weight: 700;
-    padding: 0.15rem 0.45rem;
-    box-shadow: var(--shadow-sm);
+    font-weight: 600;
+    padding: 0.25rem 0.45rem;
+    box-shadow: none;
     cursor: pointer;
   }
 
@@ -377,26 +388,26 @@
   .pane-grid {
     display: grid;
     gap: var(--space-md);
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
   }
 
   .pane {
     --stack-gap: var(--space-sm);
-    padding: var(--space-sm);
-    border: 2px solid var(--cli-border);
-    border-radius: var(--radius-md);
-    background: var(--cli-bg-elevated);
-    box-shadow: var(--shadow-sm);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .pane-title {
     --split-gap: var(--space-sm);
-    padding: 0 var(--space-xs);
+    padding: 0;
     color: var(--cli-text-dim);
     font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    font-weight: 700;
+    font-weight: 600;
   }
 
   .pane-status {
@@ -407,13 +418,13 @@
     --row-gap: var(--space-sm);
     padding: var(--space-sm) var(--space-md);
     background: var(--cli-error-bg);
-    border-bottom: 2px solid var(--cli-border);
+    border-bottom: 1px solid var(--cli-border);
     color: var(--cli-error);
   }
 
   .pane-error {
     border-bottom: 0;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     padding: var(--space-xs) var(--space-sm);
   }
 
@@ -422,6 +433,10 @@
   }
 
   @media (max-width: 900px) {
+    .hero {
+      padding: var(--space-md);
+    }
+
     .pane-toolbar {
       flex-direction: column;
       align-items: flex-start;
