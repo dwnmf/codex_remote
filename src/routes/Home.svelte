@@ -12,64 +12,128 @@
 
   const themeIcons = { system: "◐", light: "○", dark: "●" } as const;
   const RECENT_LIMIT = 5;
+  const PANE_COUNT_OPTIONS = [2, 4, 8] as const;
+  const MAX_PANES = 8;
+
+  type PaneCount = (typeof PANE_COUNT_OPTIONS)[number];
+
+  interface ComposerPane {
+    id: number;
+    task: string;
+    project: string;
+    mode: ModeKind;
+    selectedModel: string;
+    isCreating: boolean;
+    pendingStartToken: number | null;
+    submitError: string | null;
+  }
 
   const recentThreads = $derived(threads.list.slice(0, RECENT_LIMIT));
   const hasMoreThreads = $derived(threads.list.length > RECENT_LIMIT);
-
-  let task = $state("");
-  let project = $state("");
-  let mode = $state<ModeKind>("code");
-  let selectedModel = $state("");
-  let worktreeModalOpen = $state(false);
-
-  let isCreating = $state(false);
-  let pendingStartToken: number | null = null;
-  let pendingStartTimeout: ReturnType<typeof setTimeout> | null = null;
-  let submitError = $state<string | null>(null);
-
   const isConnected = $derived(socket.status === "connected");
-  const canSubmit = $derived(
-    isConnected && task.trim().length > 0 && project.trim().length > 0 && !isCreating
-  );
 
-  const currentModelLabel = $derived(
-    models.options.find((m) => m.value === selectedModel)?.label ||
-      selectedModel ||
+  let paneCount = $state<PaneCount>(2);
+  let panes = $state<ComposerPane[]>(createInitialPanes());
+  let worktreeModalOpen = $state(false);
+  let activePaneId = $state<number | null>(null);
+
+  const pendingStartTimeouts = new Map<number, ReturnType<typeof setTimeout>>();
+  const visiblePanes = $derived(panes.slice(0, paneCount));
+  const activePaneProject = $derived.by(() => {
+    if (activePaneId == null) return "";
+    return panes.find((pane) => pane.id === activePaneId)?.project ?? "";
+  });
+
+  function createInitialPanes(): ComposerPane[] {
+    const list: ComposerPane[] = [];
+    for (let index = 0; index < MAX_PANES; index += 1) {
+      list.push({
+        id: index + 1,
+        task: "",
+        project: "",
+        mode: "code",
+        selectedModel: "",
+        isCreating: false,
+        pendingStartToken: null,
+        submitError: null,
+      });
+    }
+    return list;
+  }
+
+  function updatePane(paneId: number, patch: Partial<ComposerPane>) {
+    panes = panes.map((pane) => (pane.id === paneId ? { ...pane, ...patch } : pane));
+  }
+
+  function getPane(paneId: number): ComposerPane | null {
+    return panes.find((pane) => pane.id === paneId) ?? null;
+  }
+
+  function canSubmit(pane: ComposerPane): boolean {
+    return (
+      isConnected &&
+      pane.task.trim().length > 0 &&
+      pane.project.trim().length > 0 &&
+      !pane.isCreating
+    );
+  }
+
+  function modelLabelFor(pane: ComposerPane): string {
+    return (
+      models.options.find((option) => option.value === pane.selectedModel)?.label ||
+      pane.selectedModel ||
       "Select model"
-  );
+    );
+  }
 
-  const worktreeDisplay = $derived.by(() => {
-    if (!project) return "Select project";
+  function worktreeLabelFor(path: string): string {
+    if (!path.trim()) return "Select project";
+
+    const selected = worktrees.worktrees.find((worktree) => worktree.path === path);
     const repo = worktrees.repoRoot
       ? worktrees.repoRoot.split("/").filter(Boolean).pop()
       : null;
-    const selected = worktrees.worktrees.find((wt) => wt.path === project);
-    const branch = selected?.branch;
-    if (repo && branch) return `${repo} / ${branch}`;
+
+    if (repo && selected?.branch) return `${repo} / ${selected.branch}`;
     if (repo) return repo;
-    return project.split("/").filter(Boolean).pop() || project;
-  });
+    return path.split(/[\\/]/).filter(Boolean).pop() || path;
+  }
 
-  function clearPendingStart(token: number) {
-    if (pendingStartToken !== token) return;
-    pendingStartToken = null;
-    isCreating = false;
-    if (pendingStartTimeout) {
-      clearTimeout(pendingStartTimeout);
-      pendingStartTimeout = null;
+  function clearPendingStart(paneId: number, token: number) {
+    const pane = getPane(paneId);
+    if (!pane || pane.pendingStartToken !== token) return;
+
+    const timeout = pendingStartTimeouts.get(paneId);
+    if (timeout) {
+      clearTimeout(timeout);
+      pendingStartTimeouts.delete(paneId);
     }
+
+    updatePane(paneId, { isCreating: false, pendingStartToken: null });
   }
 
-  function handleTaskChange(value: string) {
-    task = value;
+  function handleTaskChange(paneId: number, value: string) {
+    updatePane(paneId, { task: value });
   }
 
-  function handleSelectModel(value: string) {
-    selectedModel = value;
+  function handleSelectModel(paneId: number, value: string) {
+    updatePane(paneId, { selectedModel: value });
+  }
+
+  function handleToggleMode(paneId: number) {
+    const pane = getPane(paneId);
+    if (!pane) return;
+    updatePane(paneId, { mode: pane.mode === "plan" ? "code" : "plan" });
+  }
+
+  function handleOpenWorktrees(paneId: number) {
+    activePaneId = paneId;
+    worktreeModalOpen = true;
   }
 
   async function handleProjectConfirm(value: string) {
-    project = value;
+    if (activePaneId == null) return;
+    updatePane(activePaneId, { project: value });
     worktreeModalOpen = false;
     worktrees.select(value);
     if (!worktrees.repoRoot) {
@@ -77,38 +141,56 @@
     }
   }
 
-  async function handleSubmit() {
-    if (!canSubmit || pendingStartToken !== null) return;
-    submitError = null;
+  async function handleSubmit(paneId: number) {
+    const pane = getPane(paneId);
+    if (!pane || !canSubmit(pane) || pane.pendingStartToken !== null) return;
+
     const token = Date.now() + Math.floor(Math.random() * 1000);
-    pendingStartToken = token;
-    isCreating = true;
-    pendingStartTimeout = setTimeout(() => clearPendingStart(token), 30000);
+    updatePane(paneId, { isCreating: true, pendingStartToken: token, submitError: null });
+
+    const timeout = setTimeout(() => clearPendingStart(paneId, token), 30000);
+    pendingStartTimeouts.set(paneId, timeout);
 
     try {
-      const effectiveModel = selectedModel.trim() || models.defaultModel?.value?.trim() || "";
+      const effectiveModel = pane.selectedModel.trim() || models.defaultModel?.value?.trim() || "";
       const collaborationMode = effectiveModel
-        ? threads.resolveCollaborationMode(mode, effectiveModel, "medium")
+        ? threads.resolveCollaborationMode(pane.mode, effectiveModel, "medium")
         : undefined;
 
-      threads.start(project.trim(), task.trim(), {
+      threads.start(pane.project.trim(), pane.task.trim(), {
+        suppressNavigation: true,
         ...(collaborationMode ? { collaborationMode } : {}),
-        onThreadStarted: () => clearPendingStart(token),
+        onThreadStarted: () => {
+          updatePane(paneId, { task: "" });
+          clearPendingStart(paneId, token);
+        },
         onThreadStartFailed: (error) => {
-          submitError = error.message || "Failed to create task";
-          clearPendingStart(token);
+          updatePane(paneId, { submitError: error.message || "Failed to create task" });
+          clearPendingStart(paneId, token);
         },
       });
     } catch (err) {
       console.error("Failed to create task:", err);
-      submitError = err instanceof Error ? err.message : "Failed to create task";
-      clearPendingStart(token);
+      updatePane(paneId, {
+        submitError: err instanceof Error ? err.message : "Failed to create task",
+      });
+      clearPendingStart(paneId, token);
     }
   }
 
   $effect(() => {
-    if (!selectedModel && models.defaultModel) {
-      selectedModel = models.defaultModel.value;
+    const defaultModel = models.defaultModel?.value;
+    if (!defaultModel) return;
+
+    let changed = false;
+    const next = panes.map((pane) => {
+      if (pane.selectedModel) return pane;
+      changed = true;
+      return { ...pane, selectedModel: defaultModel };
+    });
+
+    if (changed) {
+      panes = next;
     }
   });
 
@@ -142,35 +224,63 @@
     </div>
   {/if}
 
-  {#if submitError}
-    <div class="error row">
-      <span class="error-icon">!</span>
-      <span class="error-text">{submitError}</span>
-    </div>
-  {/if}
-
   <main class="hero">
     <div class="hero-content">
-      <HomeTaskComposer
-        task={task}
-        mode={mode}
-        {isCreating}
-        {canSubmit}
-        {worktreeDisplay}
-        {currentModelLabel}
-        modelsStatus={models.status}
-        modelOptions={models.options}
-        {selectedModel}
-        on:taskChange={(e) => handleTaskChange(e.detail.value)}
-        on:toggleMode={() => {
-          mode = mode === "plan" ? "code" : "plan";
-        }}
-        on:openWorktrees={() => {
-          worktreeModalOpen = true;
-        }}
-        on:selectModel={(e) => handleSelectModel(e.detail.value)}
-        on:submit={handleSubmit}
-      />
+      <section class="pane-toolbar split">
+        <div class="pane-count row">
+          <span>Input windows</span>
+          {#each PANE_COUNT_OPTIONS as count}
+            <button
+              type="button"
+              class="count-btn"
+              class:active={paneCount === count}
+              onclick={() => {
+                paneCount = count;
+              }}
+            >
+              {count}
+            </button>
+          {/each}
+        </div>
+        <span class="pane-hint">Each window has its own project, mode and model.</span>
+      </section>
+
+      <section class="pane-grid">
+        {#each visiblePanes as pane (pane.id)}
+          <div class="pane stack">
+            <div class="pane-title split">
+              <span>Window {pane.id}</span>
+              {#if pane.isCreating}
+                <span class="pane-status">Starting...</span>
+              {/if}
+            </div>
+
+            {#if pane.submitError}
+              <div class="error pane-error row">
+                <span class="error-icon">!</span>
+                <span class="error-text">{pane.submitError}</span>
+              </div>
+            {/if}
+
+            <HomeTaskComposer
+              task={pane.task}
+              mode={pane.mode}
+              isCreating={pane.isCreating}
+              canSubmit={canSubmit(pane)}
+              worktreeDisplay={worktreeLabelFor(pane.project)}
+              currentModelLabel={modelLabelFor(pane)}
+              modelsStatus={models.status}
+              modelOptions={models.options}
+              selectedModel={pane.selectedModel}
+              on:taskChange={(e) => handleTaskChange(pane.id, e.detail.value)}
+              on:toggleMode={() => handleToggleMode(pane.id)}
+              on:openWorktrees={() => handleOpenWorktrees(pane.id)}
+              on:selectModel={(e) => handleSelectModel(pane.id, e.detail.value)}
+              on:submit={() => handleSubmit(pane.id)}
+            />
+          </div>
+        {/each}
+      </section>
 
       <RecentSessionsList
         loading={threads.loading}
@@ -184,9 +294,10 @@
 
 <WorktreeModal
   open={worktreeModalOpen}
-  {project}
+  project={activePaneProject}
   on:close={() => {
     worktreeModalOpen = false;
+    activePaneId = null;
   }}
   on:confirm={(e) => handleProjectConfirm(e.detail.project)}
 />
@@ -203,7 +314,7 @@
 
   .hero {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     min-height: calc(100vh - 3rem);
     padding: var(--space-md);
@@ -215,7 +326,70 @@
     align-items: stretch;
     gap: var(--space-md);
     width: 100%;
-    max-width: var(--app-max-width);
+    max-width: min(1600px, calc(100vw - var(--space-md) * 2));
+  }
+
+  .pane-toolbar {
+    --split-gap: var(--space-md);
+    align-items: center;
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-md);
+    background: var(--cli-bg-elevated);
+  }
+
+  .pane-count {
+    --row-gap: var(--space-xs);
+    align-items: center;
+    color: var(--cli-text-dim);
+    font-size: var(--text-xs);
+  }
+
+  .count-btn {
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--cli-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    padding: 0.15rem 0.45rem;
+    cursor: pointer;
+  }
+
+  .count-btn.active {
+    background: color-mix(in srgb, var(--cli-prefix-agent) 20%, transparent);
+    color: var(--cli-prefix-agent);
+    border-color: color-mix(in srgb, var(--cli-prefix-agent) 45%, var(--cli-border));
+  }
+
+  .pane-hint {
+    color: var(--cli-text-muted);
+    font-size: var(--text-xs);
+  }
+
+  .pane-grid {
+    display: grid;
+    gap: var(--space-md);
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  }
+
+  .pane {
+    --stack-gap: var(--space-sm);
+    padding: var(--space-sm);
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--cli-bg-elevated) 75%, transparent);
+  }
+
+  .pane-title {
+    --split-gap: var(--space-sm);
+    padding: 0 var(--space-xs);
+    color: var(--cli-text-dim);
+    font-size: var(--text-xs);
+  }
+
+  .pane-status {
+    color: var(--cli-prefix-agent);
   }
 
   .error {
@@ -226,7 +400,25 @@
     color: var(--cli-error);
   }
 
+  .pane-error {
+    border-bottom: 0;
+    border-radius: var(--radius-sm);
+    padding: var(--space-xs) var(--space-sm);
+  }
+
   .error-icon {
     font-weight: 600;
+  }
+
+  @media (max-width: 900px) {
+    .pane-toolbar {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: var(--space-sm);
+    }
+
+    .pane-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

@@ -14,6 +14,15 @@ const DEFAULT_SETTINGS: ThreadSettings = {
   mode: "code",
 };
 
+interface PendingStart {
+  input: string | null;
+  model: string | null;
+  collaborationMode: CollaborationMode | null;
+  suppressNavigation: boolean;
+  onThreadStarted: ((threadId: string) => void) | null;
+  onThreadStartFailed: ((error: Error) => void) | null;
+}
+
 class ThreadsStore {
   list = $state<ThreadInfo[]>([]);
   currentId = $state<string | null>(null);
@@ -22,12 +31,7 @@ class ThreadsStore {
   #settings = $state<Map<string, ThreadSettings>>(new Map());
   #nextId = 1;
   #pendingRequests = new Map<number, string>();
-  #pendingStartInput: string | null = null;
-  #pendingStartModel: string | null = null;
-  #pendingCollaborationMode: CollaborationMode | null = null;
-  #pendingStartCallback: ((threadId: string) => void) | null = null;
-  #pendingStartErrorCallback: ((error: Error) => void) | null = null;
-  #suppressNextNavigation = false;
+  #pendingStarts = new Map<number, PendingStart>();
   #collaborationPresets: CollaborationModeMask[] = [];
 
   constructor() {
@@ -149,7 +153,7 @@ class ThreadsStore {
       const params = msg.params as { thread: ThreadInfo };
       if (params?.thread) {
         socket.subscribeThread(params.thread.id);
-        this.#handleNewThread(params.thread);
+        this.#addThread(params.thread);
       }
       return;
     }
@@ -174,10 +178,14 @@ class ThreadsStore {
       }
 
       if (type === "start" && msg.error) {
-        this.#handleStartFailure(msg.error);
+        const pending = this.#pendingStarts.get(msg.id as number) ?? null;
+        this.#pendingStarts.delete(msg.id as number);
+        this.#handleStartFailure(msg.error, pending);
       }
 
       if (type === "start" && msg.result) {
+        const pending = this.#pendingStarts.get(msg.id as number) ?? null;
+        this.#pendingStarts.delete(msg.id as number);
         const result = msg.result as {
           thread?: ThreadInfo;
           model?: string;
@@ -188,53 +196,48 @@ class ThreadsStore {
         if (thread?.id) {
           const sandbox = this.#normalizeSandbox(result.sandbox);
           this.updateSettings(thread.id, {
-            model: result.model ?? this.#pendingStartModel ?? "",
+            model: result.model ?? pending?.model ?? "",
             reasoningEffort: result.reasoningEffort ?? DEFAULT_SETTINGS.reasoningEffort,
             ...(sandbox ? { sandbox } : {}),
           });
 
-          // Handle thread creation if thread/started notification hasn't arrived
-          if (!this.list.some((t) => t.id === thread.id)) {
-            socket.subscribeThread(thread.id);
-            this.#handleNewThread(thread);
-          }
+          socket.subscribeThread(thread.id);
+          this.#handleStartedThread(thread, pending);
         }
-      }
-
-      if (type === "start") {
-        this.#pendingStartModel = null;
       }
     }
   }
 
-  #handleNewThread(thread: ThreadInfo) {
+  #addThread(thread: ThreadInfo) {
     if (this.list.some((t) => t.id === thread.id)) return;
     this.list = [thread, ...this.list];
-    this.currentId = thread.id;
-    if (this.#pendingStartCallback) {
-      this.#pendingStartCallback(thread.id);
-      this.#pendingStartCallback = null;
+  }
+
+  #handleStartedThread(thread: ThreadInfo, pending: PendingStart | null) {
+    this.#addThread(thread);
+
+    if (pending?.onThreadStarted) {
+      pending.onThreadStarted(thread.id);
     }
-    this.#pendingStartErrorCallback = null;
-    if (!this.#suppressNextNavigation) {
+
+    if (!pending?.suppressNavigation) {
+      this.currentId = thread.id;
       navigate("/thread/:id", { params: { id: thread.id } });
     }
-    if (this.#pendingStartInput) {
+
+    if (pending?.input) {
       socket.send({
         method: "turn/start",
         id: this.#nextId++,
         params: {
           threadId: thread.id,
-          input: [{ type: "text", text: this.#pendingStartInput }],
-          ...(this.#pendingCollaborationMode
-            ? { collaborationMode: this.#pendingCollaborationMode }
+          input: [{ type: "text", text: pending.input }],
+          ...(pending.collaborationMode
+            ? { collaborationMode: pending.collaborationMode }
             : {}),
         },
       });
-      this.#pendingStartInput = null;
-      this.#pendingCollaborationMode = null;
     }
-    this.#suppressNextNavigation = false;
   }
 
   #normalizeSandbox(input: unknown): SandboxMode | null {
@@ -274,13 +277,16 @@ class ThreadsStore {
   ) {
     const requestedModel = this.#resolveStartModel(options?.collaborationMode);
     const id = this.#nextId++;
+    const pending: PendingStart = {
+      input: input?.trim() ? input.trim() : null,
+      model: requestedModel,
+      collaborationMode: options?.collaborationMode ?? null,
+      suppressNavigation: options?.suppressNavigation ?? false,
+      onThreadStarted: options?.onThreadStarted ?? null,
+      onThreadStartFailed: options?.onThreadStartFailed ?? null,
+    };
     this.#pendingRequests.set(id, "start");
-    this.#pendingStartInput = input?.trim() ? input.trim() : null;
-    this.#pendingStartModel = requestedModel;
-    this.#pendingCollaborationMode = options?.collaborationMode ?? null;
-    this.#pendingStartCallback = options?.onThreadStarted ?? null;
-    this.#pendingStartErrorCallback = options?.onThreadStartFailed ?? null;
-    this.#suppressNextNavigation = options?.suppressNavigation ?? false;
+    this.#pendingStarts.set(id, pending);
     const sendResult = socket.send({
       method: "thread/start",
       id,
@@ -293,8 +299,9 @@ class ThreadsStore {
     });
     if (!sendResult.success) {
       this.#pendingRequests.delete(id);
+      this.#pendingStarts.delete(id);
       const message = sendResult.error ?? "Failed to start thread";
-      this.#handleStartFailure({ message });
+      this.#handleStartFailure({ message }, pending);
       throw new Error(message);
     }
   }
@@ -305,17 +312,11 @@ class ThreadsStore {
     return models.defaultModel?.value ?? null;
   }
 
-  #handleStartFailure(error: unknown) {
+  #handleStartFailure(error: unknown, pending: PendingStart | null) {
     const message = this.#getErrorMessage(error);
-    if (this.#pendingStartErrorCallback) {
-      this.#pendingStartErrorCallback(new Error(message));
+    if (pending?.onThreadStartFailed) {
+      pending.onThreadStartFailed(new Error(message));
     }
-    this.#pendingStartCallback = null;
-    this.#pendingStartErrorCallback = null;
-    this.#pendingStartInput = null;
-    this.#pendingStartModel = null;
-    this.#pendingCollaborationMode = null;
-    this.#suppressNextNavigation = false;
   }
 
   #getErrorMessage(error: unknown): string {
