@@ -62,16 +62,16 @@ class RelayHub:
             await self._remove_socket_locked(socket, role)
 
     async def handle_message(self, socket: WebSocket, role: str, raw_data: str) -> None:
-        if raw_data.strip() == '{"type":"ping"}':
-            await self._send_json(socket, {"type": "pong"})
-            return
-
         try:
             msg = json.loads(raw_data)
             if not isinstance(msg, dict):
                 msg = None
         except json.JSONDecodeError:
             msg = None
+
+        if msg and msg.get("type") == "ping":
+            await self._send_json(socket, {"type": "pong"})
+            return
 
         if msg and await self._handle_subscription(socket, role, msg):
             return

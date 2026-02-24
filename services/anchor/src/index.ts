@@ -822,17 +822,16 @@ async function connectOrbit(): Promise<void> {
           ? new TextDecoder().decode(event.data)
           : new TextDecoder().decode(event.data as ArrayBuffer);
 
-    if (text === '{"type":"pong"}') {
-      if (orbitHeartbeatTimeout) {
-        clearTimeout(orbitHeartbeatTimeout);
-        orbitHeartbeatTimeout = null;
-      }
-      return;
-    }
-
     // Handle orbit protocol messages
     try {
       const parsed = JSON.parse(text) as JsonObject;
+      if (parsed.type === "pong") {
+        if (orbitHeartbeatTimeout) {
+          clearTimeout(orbitHeartbeatTimeout);
+          orbitHeartbeatTimeout = null;
+        }
+        return;
+      }
       if (typeof parsed.type === "string" && (parsed.type as string).startsWith("orbit.")) {
         // Client (re)subscribed — re-send any pending approval for this thread
         if (parsed.type === "orbit.client-subscribed" && typeof parsed.threadId === "string") {

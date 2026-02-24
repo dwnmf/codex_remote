@@ -140,13 +140,12 @@ class SocketStore {
     };
 
     this.#socket.onmessage = (event) => {
-      if (event.data === '{"type":"pong"}') {
-        this.#clearHeartbeatTimeout();
-        return;
-      }
-
       try {
         const msg = JSON.parse(event.data) as Record<string, unknown>;
+        if (msg.type === "pong") {
+          this.#clearHeartbeatTimeout();
+          return;
+        }
 
         // Handle orbit protocol messages
         if (typeof msg.type === "string" && msg.type.startsWith("orbit.")) {
