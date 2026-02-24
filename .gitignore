@@ -1,0 +1,34 @@
+# dependencies
+node_modules
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+*.log
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# environment variables
+.env
+.env.*
+!.env.example
+credentials.json
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+.wrangler/
+**/.wrangler/
+
+# misc
+.DS_Store
+.ideas
+plans

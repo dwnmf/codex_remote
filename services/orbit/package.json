@@ -1,0 +1,20 @@
+{
+  "name": "orbit",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bunx wrangler dev",
+    "deploy": "bunx wrangler deploy",
+    "types": "bunx wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250909.0",
+    "wrangler": "^3.100.0"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "^11.0.0",
+    "jose": "^6.1.0",
+    "@pushforge/builder": "^1.1.0",
+    "hono": "^4.9.7"
+  }
+}

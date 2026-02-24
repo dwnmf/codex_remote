@@ -1,0 +1,388 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")")" && pwd)"
+ZANE_HOME="${ZANE_HOME:-$(dirname "$SCRIPT_DIR")}"
+ANCHOR_DIR="$ZANE_HOME/services/anchor"
+ENV_FILE="$ZANE_HOME/.env"
+CREDENTIALS_FILE="$ZANE_HOME/credentials.json"
+
+# ── Colors ──────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BOLD='\033[1m'
+DIM='\033[2m'
+RESET='\033[0m'
+
+pass() { printf "  ${GREEN}✓${RESET} %s\n" "$1"; }
+fail() { printf "  ${RED}✗${RESET} %s\n" "$1"; }
+warn() { printf "  ${YELLOW}⚠${RESET} %s\n" "$1"; }
+info() { printf "  %s\n" "$1"; }
+
+wrangler_tty() {
+  if [[ -r /dev/tty ]]; then
+    wrangler "$@" < /dev/tty
+  else
+    wrangler "$@"
+  fi
+}
+
+retry_cmd() {
+  local attempts="$1" delay="$2" desc="$3"
+  shift 3
+  local i
+  for ((i = 1; i <= attempts; i++)); do
+    if "$@"; then
+      return 0
+    fi
+    if ((i < attempts)); then
+      warn "$desc failed (attempt $i/$attempts) — retrying in ${delay}s..."
+      sleep "$delay"
+    fi
+  done
+  return 1
+}
+
+resolve_origin_branch() {
+  local repo="$1"
+  local remote_head
+  remote_head=$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  if [[ -n "$remote_head" ]]; then
+    printf "%s" "${remote_head#origin/}"
+    return
+  fi
+  printf "main"
+}
+
+# ── Commands ────────────────────────────────────
+
+cmd_start() {
+  if ! command -v bun &>/dev/null; then
+    echo "Error: bun is not installed. Run 'zane doctor' for details."
+    exit 1
+  fi
+
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo "Error: $ENV_FILE not found. Run the install script or create it from .env.example."
+    exit 1
+  fi
+
+  if [[ ! -f "$ANCHOR_DIR/src/index.ts" ]]; then
+    echo "Error: Anchor service not found at $ANCHOR_DIR"
+    exit 1
+  fi
+
+  ZANE_CREDENTIALS_FILE="$CREDENTIALS_FILE" exec bun --env-file "$ENV_FILE" "$ANCHOR_DIR/src/index.ts"
+}
+
+cmd_login() {
+  if ! command -v bun &>/dev/null; then
+    echo "Error: bun is not installed. Run 'zane doctor' for details."
+    exit 1
+  fi
+
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo "Error: $ENV_FILE not found. Run the install script first."
+    exit 1
+  fi
+
+  if [[ ! -f "$ANCHOR_DIR/src/index.ts" ]]; then
+    echo "Error: Anchor service not found at $ANCHOR_DIR"
+    exit 1
+  fi
+
+  ZANE_FORCE_LOGIN=1 ZANE_CREDENTIALS_FILE="$CREDENTIALS_FILE" exec bun --env-file "$ENV_FILE" "$ANCHOR_DIR/src/index.ts"
+}
+
+cmd_doctor() {
+  echo ""
+  printf "${BOLD}Zane Doctor${RESET}\n"
+  echo ""
+
+  local has_error=0
+
+  # Check ZANE_HOME
+  if [[ -d "$ZANE_HOME" ]]; then
+    pass "ZANE_HOME exists ($ZANE_HOME)"
+  else
+    fail "ZANE_HOME not found ($ZANE_HOME)"
+    has_error=1
+  fi
+
+  # Check .env
+  if [[ -f "$ENV_FILE" ]]; then
+    pass ".env file exists"
+  else
+    fail ".env file not found at $ENV_FILE"
+    has_error=1
+  fi
+
+  # Check Bun
+  if command -v bun &>/dev/null; then
+    pass "bun $(bun --version)"
+  else
+    fail "bun not installed"
+    has_error=1
+  fi
+
+  # Check codex
+  if command -v codex &>/dev/null; then
+    pass "codex CLI installed"
+  else
+    fail "codex CLI not installed"
+    has_error=1
+  fi
+
+  # Check anchor source
+  if [[ -f "$ANCHOR_DIR/src/index.ts" ]]; then
+    pass "Anchor service found"
+  else
+    fail "Anchor service not found at $ANCHOR_DIR"
+    has_error=1
+  fi
+
+  # Check node_modules
+  if [[ -d "$ANCHOR_DIR/node_modules" ]]; then
+    pass "Anchor dependencies installed"
+  else
+    warn "Anchor dependencies not installed (run: cd $ANCHOR_DIR && bun install)"
+  fi
+
+  # Check env config and credentials
+  if [[ -f "$ENV_FILE" ]]; then
+    local orbit_url=""
+    orbit_url=$(grep -E '^ANCHOR_ORBIT_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+
+    if [[ -n "$orbit_url" ]]; then
+      pass "ANCHOR_ORBIT_URL configured"
+      if [[ -f "$CREDENTIALS_FILE" ]]; then
+        pass "Credentials file exists ($CREDENTIALS_FILE)"
+      else
+        warn "Not logged in. Run 'zane login' or 'zane start' to authenticate."
+      fi
+    else
+      info "ANCHOR_ORBIT_URL not set (local-only mode)"
+    fi
+  fi
+
+  # Check if anchor is already running
+  local port
+  port=$(grep -E '^ANCHOR_PORT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo "8788")
+  port="${port:-8788}"
+
+  if curl -sf "http://localhost:$port/health" &>/dev/null; then
+    local health
+    health=$(curl -sf "http://localhost:$port/health" 2>/dev/null || echo "{}")
+    pass "Anchor is running on port $port"
+    local app_server
+    app_server=$(echo "$health" | grep -o '"appServer":[^,}]*' | cut -d: -f2 || echo "unknown")
+    local orbit_status
+    orbit_status=$(echo "$health" | grep -o '"orbit":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+    info "  app-server: $app_server"
+    info "  orbit: $orbit_status"
+  else
+    info "Anchor is not running on port $port"
+  fi
+
+  echo ""
+  if [[ $has_error -eq 0 ]]; then
+    printf "${GREEN}All checks passed.${RESET}\n"
+  else
+    printf "${RED}Some checks failed. Fix the issues above and try again.${RESET}\n"
+  fi
+  echo ""
+}
+
+cmd_config() {
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo "No .env file found at $ENV_FILE"
+    echo "Run the install script to create one, or copy from .env.example"
+    exit 1
+  fi
+
+  local editor="${EDITOR:-nano}"
+  exec "$editor" "$ENV_FILE"
+}
+
+cmd_update() {
+  echo "Updating Zane..."
+
+  if [[ ! -d "$ZANE_HOME/.git" ]]; then
+    echo "Error: $ZANE_HOME is not a git repository."
+    exit 1
+  fi
+
+  local before after target_branch
+  before=$(git -C "$ZANE_HOME" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+  if [[ -n "$(git -C "$ZANE_HOME" status --porcelain)" ]]; then
+    warn "Local changes detected and will be overwritten."
+  fi
+
+  retry_cmd 3 3 "git fetch" git -C "$ZANE_HOME" fetch --prune origin \
+    || { echo "Error: Failed to fetch updates from origin."; exit 1; }
+
+  target_branch=$(resolve_origin_branch "$ZANE_HOME")
+  if ! git -C "$ZANE_HOME" show-ref --verify --quiet "refs/remotes/origin/$target_branch"; then
+    echo "Error: Remote branch origin/$target_branch not found."
+    exit 1
+  fi
+
+  git -C "$ZANE_HOME" reset --hard --quiet "origin/$target_branch"
+  git -C "$ZANE_HOME" clean -fd --quiet
+
+  after=$(git -C "$ZANE_HOME" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+  if [[ "$before" == "$after" ]]; then
+    echo "Already up to date ($after on origin/$target_branch)."
+  else
+    echo "Updated $before -> $after (origin/$target_branch)"
+  fi
+
+  # Re-apply D1 database ID to wrangler.toml files after reset
+  if [[ -f "$ENV_FILE" ]]; then
+    local db_id
+    db_id=$(grep -E '^D1_DATABASE_ID=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+    if [[ -n "$db_id" ]]; then
+      for toml_path in "$ZANE_HOME/wrangler.toml" "$ZANE_HOME/services/orbit/wrangler.toml"; do
+        if [[ -f "$toml_path" ]]; then
+          sed -i '' "s/database_id = \"[^\"]*\"/database_id = \"$db_id\"/" "$toml_path"
+        fi
+      done
+    fi
+  fi
+
+  echo "Installing dependencies..."
+  retry_cmd 3 3 "Anchor dependency install" bash -c 'cd "$1" && bun install --silent' _ "$ANCHOR_DIR" \
+    || { echo "Error: Failed to install Anchor dependencies."; exit 1; }
+
+  # Redeploy web and orbit if self-hosted
+  if [[ -f "$ENV_FILE" ]]; then
+    local auth_url
+    local vapid_public_key
+    auth_url=$(grep -E '^AUTH_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+    vapid_public_key=$(grep -E '^VAPID_PUBLIC_KEY=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+    if [[ -n "$auth_url" ]]; then
+      if ! command -v wrangler &>/dev/null; then
+        echo "Error: wrangler not found. Install with: bun add -g wrangler"
+        exit 1
+      fi
+      if [[ -z "$vapid_public_key" ]]; then
+        echo "Error: VAPID_PUBLIC_KEY is missing in $ENV_FILE."
+        echo "Run 'zane self-host' to regenerate and persist push settings."
+        exit 1
+      fi
+
+      echo "Rebuilding web..."
+      retry_cmd 3 3 "Web dependency install" bash -c 'cd "$1" && bun install --silent' _ "$ZANE_HOME" \
+        || { echo "Error: Failed to install web dependencies."; exit 1; }
+      (cd "$ZANE_HOME" && AUTH_URL="$auth_url" VAPID_PUBLIC_KEY="$vapid_public_key" bun run build) \
+        || { echo "Error: Web build failed."; exit 1; }
+
+      echo "Deploying web..."
+      (cd /tmp && CI=true wrangler_tty pages deploy "$ZANE_HOME/dist" --project-name zane --commit-dirty=true) \
+        || { echo "Error: Pages deploy failed."; exit 1; }
+
+      echo "Deploying orbit..."
+      retry_cmd 3 3 "Orbit dependency install" bash -c 'cd "$1" && bun install --silent' _ "$ZANE_HOME/services/orbit" \
+        || { echo "Error: Failed to install Orbit dependencies."; exit 1; }
+      (cd "$ZANE_HOME/services/orbit" && wrangler_tty deploy) \
+        || { echo "Error: Orbit deploy failed."; exit 1; }
+    fi
+  fi
+
+  echo "Done."
+}
+
+cmd_self_host() {
+  local script="$ZANE_HOME/bin/self-host.sh"
+  if [[ ! -f "$script" ]]; then
+    echo "Error: self-host wizard not found at $script"
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  source "$script"
+}
+
+cmd_uninstall() {
+  echo ""
+  printf "${BOLD}Uninstall Zane${RESET}\n"
+  echo ""
+  echo "This will remove:"
+  echo "  $ZANE_HOME"
+  echo "  PATH entries from shell config"
+  echo ""
+  printf "Are you sure? [y/N] "
+  read -r confirm
+  if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+    echo "Cancelled."
+    exit 0
+  fi
+
+  # Remove ZANE_HOME
+  if [[ -d "$ZANE_HOME" ]]; then
+    rm -rf "$ZANE_HOME"
+    echo "Removed $ZANE_HOME"
+  fi
+
+  # Clean PATH from shell rc files
+  local rc_files=("$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile")
+  for rc in "${rc_files[@]}"; do
+    if [[ -f "$rc" ]] && grep -q 'ZANE_HOME' "$rc"; then
+      sed -i '' '/ZANE_HOME/d' "$rc"
+      echo "Cleaned $rc"
+    fi
+  done
+
+  echo ""
+  echo "Zane has been uninstalled. Restart your terminal to apply PATH changes."
+}
+
+cmd_version() {
+  if [[ -d "$ZANE_HOME/.git" ]]; then
+    local tag
+    tag=$(git -C "$ZANE_HOME" describe --tags --always 2>/dev/null || echo "dev")
+    echo "zane $tag"
+  else
+    echo "zane dev"
+  fi
+}
+
+cmd_help() {
+  echo ""
+  printf "${BOLD}Zane${RESET} — local AI assistant bridge\n"
+  echo ""
+  echo "Usage: zane <command>"
+  echo ""
+  echo "Commands:"
+  echo "  start       Start the anchor service"
+  echo "  login       Re-authenticate with the web app"
+  echo "  doctor      Check prerequisites and configuration"
+  echo "  config      Open .env in your editor"
+  echo "  update      Pull latest code and reinstall dependencies"
+  echo "  self-host   Run the self-host setup wizard"
+  echo "  uninstall   Remove Zane from your system"
+  echo "  version     Print version"
+  echo "  help        Show this help"
+  echo ""
+}
+
+# ── Main ────────────────────────────────────────
+
+case "${1:-help}" in
+  start)      cmd_start ;;
+  login)      cmd_login ;;
+  doctor)     cmd_doctor ;;
+  config)     cmd_config ;;
+  update)     cmd_update ;;
+  self-host)  cmd_self_host ;;
+  uninstall)  cmd_uninstall ;;
+  version)    cmd_version ;;
+  help|--help|-h) cmd_help ;;
+  *)
+    echo "Unknown command: $1"
+    cmd_help
+    exit 1
+    ;;
+esac
