@@ -46,7 +46,7 @@
     inset: 0;
     background: var(--cli-bg);
     color: var(--cli-text);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
   }
 
   .login-left {
@@ -73,8 +73,10 @@
   }
 
   .brand {
-    font-weight: 600;
-    letter-spacing: 0.1em;
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 400;
+    letter-spacing: 0.03em;
     text-transform: uppercase;
     color: var(--cli-prefix-agent);
     text-decoration: none;
@@ -82,7 +84,7 @@
 
   .icon-btn {
     background: transparent;
-    border: 1px solid var(--cli-border);
+    border: 2px solid var(--cli-border);
     color: var(--cli-text);
     border-radius: var(--radius-sm);
     padding: var(--space-xs) var(--space-sm);
@@ -138,10 +140,8 @@
     align-items: flex-end;
     justify-content: flex-start;
     padding: var(--space-xl);
-    background:
-      linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, transparent 50%),
-      var(--cli-bg-elevated);
-    border-left: 1px solid var(--cli-border);
+    background: var(--cli-bg-elevated);
+    border-left: 2px solid var(--cli-border);
     position: relative;
     overflow: hidden;
   }
@@ -154,18 +154,18 @@
       repeating-linear-gradient(
         0deg,
         transparent,
-        transparent 60px,
-        var(--cli-border) 60px,
-        var(--cli-border) 61px
+        transparent 44px,
+        color-mix(in srgb, var(--cli-border) 35%, transparent) 44px,
+        color-mix(in srgb, var(--cli-border) 35%, transparent) 45px
       ),
       repeating-linear-gradient(
         90deg,
         transparent,
-        transparent 60px,
-        var(--cli-border) 60px,
-        var(--cli-border) 61px
+        transparent 44px,
+        color-mix(in srgb, var(--cli-border) 20%, transparent) 44px,
+        color-mix(in srgb, var(--cli-border) 20%, transparent) 45px
       );
-    opacity: 0.5;
+    opacity: 0.9;
   }
 
   .visual-text {
@@ -177,8 +177,10 @@
 
   .visual-label {
     font-size: clamp(1.25rem, 2vw, 1.75rem);
-    font-weight: 600;
-    line-height: 1.3;
+    font-family: var(--font-display);
+    font-weight: 400;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
   }
 
   .visual-desc {

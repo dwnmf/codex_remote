@@ -170,15 +170,17 @@
   .input-card {
     --stack-gap: 0;
     width: 100%;
-    border: 1px solid var(--cli-border);
+    border: 2px solid var(--cli-border);
     border-radius: var(--radius-md);
     background: var(--cli-bg);
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
   }
 
   .input-card:focus-within {
-    border-color: var(--cli-text-muted);
+    border-color: var(--cli-prefix-agent);
     box-shadow: var(--shadow-focus);
+    transform: translate(-1px, -1px);
   }
 
   .input-card textarea {
@@ -189,9 +191,10 @@
     background: transparent;
     border: none;
     color: var(--cli-text);
-    font-family: var(--font-mono);
-    font-size: 16px;
-    line-height: 1.6;
+    font-family: var(--font-sans);
+    font-size: 1.03rem;
+    font-weight: 500;
+    line-height: 1.5;
     resize: vertical;
     min-height: 5.5rem;
   }
@@ -212,7 +215,7 @@
   .input-footer {
     --split-gap: var(--space-sm);
     padding: var(--space-sm) var(--space-md);
-    border-top: 1px solid var(--cli-border);
+    border-top: 2px solid var(--cli-border);
   }
 
   .tools {
@@ -223,11 +226,14 @@
     --row-gap: var(--space-xs);
     padding: var(--space-xs) var(--space-sm);
     background: transparent;
-    border: none;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--cli-text-muted);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     cursor: pointer;
     transition: all var(--transition-fast);
   }
@@ -235,6 +241,7 @@
   .tool-btn:hover {
     background: var(--cli-bg-hover);
     color: var(--cli-text);
+    border-color: var(--cli-border);
   }
 
   .tool-btn svg {
@@ -260,7 +267,7 @@
     height: 2rem;
     padding: 0;
     background: var(--cli-prefix-agent);
-    border: none;
+    border: 2px solid var(--cli-border);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: opacity var(--transition-fast);
@@ -291,12 +298,15 @@
     gap: var(--space-xs);
     max-width: 16rem;
     padding: var(--space-xs) var(--space-sm);
-    border: 1px solid var(--cli-border);
+    border: 2px solid var(--cli-border);
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--cli-text-muted);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     cursor: pointer;
     transition: all var(--transition-fast);
   }
@@ -333,7 +343,7 @@
     margin-bottom: var(--space-xs);
     padding: var(--space-xs);
     background: var(--cli-bg-elevated);
-    border: 1px solid var(--cli-border);
+    border: 2px solid var(--cli-border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-popover);
     z-index: 100;

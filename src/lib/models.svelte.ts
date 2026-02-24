@@ -14,7 +14,10 @@ class ModelsStore {
 
   constructor() {
     socket.onMessage((msg) => this.#handleMessage(msg));
-    socket.onConnect(() => this.fetch());
+    socket.onConnect(() => {
+      if (this.status === "success" && this.options.length > 0) return;
+      this.refresh();
+    });
   }
 
   /** Fetch models if we haven't already */

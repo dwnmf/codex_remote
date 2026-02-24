@@ -86,7 +86,7 @@
     min-height: 100vh;
     background: var(--cli-bg);
     color: var(--cli-text);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     padding: var(--space-lg) var(--space-md);
   }
 
@@ -103,15 +103,17 @@
   }
 
   .brand {
-    font-weight: 600;
-    letter-spacing: 0.1em;
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 400;
+    letter-spacing: 0.03em;
     text-transform: uppercase;
     color: var(--cli-prefix-agent);
   }
 
   .icon-btn {
     background: transparent;
-    border: 1px solid var(--cli-border);
+    border: 2px solid var(--cli-border);
     color: var(--cli-text);
     border-radius: var(--radius-sm);
     padding: var(--space-xs) var(--space-sm);
@@ -142,6 +144,8 @@
   .hero h1 {
     margin: 0;
     font-size: clamp(2rem, 4vw, 3.5rem);
+    letter-spacing: -0.02em;
+    text-wrap: balance;
   }
 
   .hero p {
@@ -165,23 +169,28 @@
   .ghost-btn {
     padding: var(--space-xs) var(--space-sm);
     border-radius: var(--radius-sm);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     line-height: 1;
     cursor: pointer;
     text-decoration: none;
   }
 
   .primary-btn {
-    border: 1px solid var(--cli-border);
+    border: 2px solid var(--cli-border);
     background: var(--color-btn-primary-bg, var(--cli-prefix-agent));
     color: var(--color-btn-primary-text, var(--cli-bg));
+    box-shadow: var(--shadow-sm);
   }
 
   .ghost-btn {
     background: transparent;
-    border: 1px solid var(--cli-border);
+    border: 2px solid var(--cli-border);
     color: var(--cli-text-dim);
+    box-shadow: var(--shadow-sm);
   }
 
   .primary-btn:hover {
@@ -214,14 +223,18 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
+    padding: var(--space-sm);
+    border: 2px solid var(--cli-border);
+    background: var(--cli-bg-elevated);
+    box-shadow: var(--shadow-sm);
   }
 
   .feature-label {
     font-size: var(--text-xs);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.12em;
     color: var(--cli-prefix-agent);
-    font-weight: 600;
+    font-weight: 800;
   }
 
   .feature p {

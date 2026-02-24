@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Archivo+Black&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap");
 @import "./lib/styles/tokens.css";
 @import "./lib/styles/layout.css";
 
@@ -10,7 +11,7 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--cli-text);
   background: var(--cli-bg);
   transition:
@@ -20,6 +21,46 @@ body {
 
 #app {
   height: 100%;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.2;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0,
+      transparent 39px,
+      color-mix(in srgb, var(--cli-border) 20%, transparent) 39px,
+      color-mix(in srgb, var(--cli-border) 20%, transparent) 40px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 39px,
+      color-mix(in srgb, var(--cli-border) 12%, transparent) 39px,
+      color-mix(in srgb, var(--cli-border) 12%, transparent) 40px
+    );
+  z-index: 0;
+}
+
+#app {
+  position: relative;
+  z-index: 1;
 }
 
 
@@ -52,9 +93,9 @@ select {
 
 ::-webkit-scrollbar-thumb {
   background: var(--cli-border);
-  border-radius: 4px;
+  border-radius: 0;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--cli-text-muted);
+  background: var(--cli-prefix-agent);
 }

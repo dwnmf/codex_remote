@@ -260,22 +260,26 @@
 
   .input-container {
     --stack-gap: 0;
-    border: 1px solid var(--cli-border);
+    border: 2px solid var(--cli-border);
     border-radius: var(--radius-md);
     background: var(--cli-bg);
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
   }
 
   .input-container:focus-within {
-    border-color: var(--cli-text-muted);
+    border-color: var(--cli-prefix-agent);
     box-shadow: var(--shadow-focus);
+    transform: translate(-1px, -1px);
   }
 
   textarea {
     flex: 1;
     padding: var(--space-md);
-    font-family: var(--font-mono);
-    line-height: 1.6;
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    font-weight: 500;
+    line-height: 1.5;
     color: var(--cli-text);
     background: transparent;
     border: none;
@@ -301,7 +305,7 @@
   .footer {
     --split-gap: var(--space-sm);
     padding: var(--space-sm) var(--space-md);
-    border-top: 1px solid var(--cli-border);
+    border-top: 2px solid var(--cli-border);
   }
 
   .tools {
@@ -313,11 +317,14 @@
     --row-gap: var(--space-xs);
     padding: var(--space-xs) var(--space-sm);
     background: transparent;
-    border: none;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--cli-text-muted);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     cursor: pointer;
     transition: all var(--transition-fast);
   }
@@ -325,6 +332,7 @@
   .tool-btn:hover {
     background: var(--cli-bg-hover);
     color: var(--cli-text);
+    border-color: var(--cli-border);
   }
 
   .tool-btn svg {
@@ -357,7 +365,7 @@
     margin-bottom: var(--space-xs);
     padding: var(--space-xs);
     background: var(--cli-bg-elevated);
-    border: 1px solid var(--cli-border);
+    border: 2px solid var(--cli-border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-popover);
     z-index: 100;
@@ -383,8 +391,11 @@
     border: none;
     border-radius: var(--radius-sm);
     color: var(--cli-text);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     text-align: left;
     cursor: pointer;
     transition: background var(--transition-fast);
@@ -401,8 +412,10 @@
   .dropdown-empty {
     padding: var(--space-sm);
     color: var(--cli-text-muted);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     text-align: center;
   }
 
@@ -419,7 +432,7 @@
     height: 2rem;
     padding: 0;
     background: var(--cli-prefix-agent);
-    border: none;
+    border: 2px solid var(--cli-border);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: opacity var(--transition-fast);
@@ -447,7 +460,7 @@
     height: 2rem;
     padding: 0;
     background: var(--cli-error);
-    border: none;
+    border: 2px solid var(--cli-border);
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: opacity var(--transition-fast);

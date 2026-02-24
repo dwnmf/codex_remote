@@ -307,7 +307,7 @@
     min-height: 100vh;
     background: var(--cli-bg);
     color: var(--cli-text);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     --stack-gap: 0;
   }
@@ -333,9 +333,10 @@
     --split-gap: var(--space-md);
     align-items: center;
     padding: var(--space-sm) var(--space-md);
-    border: 1px solid var(--cli-border);
+    border: 2px solid var(--cli-border);
     border-radius: var(--radius-md);
     background: var(--cli-bg-elevated);
+    box-shadow: var(--shadow-sm);
   }
 
   .pane-count {
@@ -343,16 +344,21 @@
     align-items: center;
     color: var(--cli-text-dim);
     font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
   }
 
   .count-btn {
-    border: 1px solid var(--cli-border);
+    border: 2px solid var(--cli-border);
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--cli-text-muted);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
+    font-weight: 700;
     padding: 0.15rem 0.45rem;
+    box-shadow: var(--shadow-sm);
     cursor: pointer;
   }
 
@@ -365,6 +371,7 @@
   .pane-hint {
     color: var(--cli-text-muted);
     font-size: var(--text-xs);
+    font-weight: 600;
   }
 
   .pane-grid {
@@ -376,9 +383,10 @@
   .pane {
     --stack-gap: var(--space-sm);
     padding: var(--space-sm);
-    border: 1px solid var(--cli-border);
+    border: 2px solid var(--cli-border);
     border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--cli-bg-elevated) 75%, transparent);
+    background: var(--cli-bg-elevated);
+    box-shadow: var(--shadow-sm);
   }
 
   .pane-title {
@@ -386,6 +394,9 @@
     padding: 0 var(--space-xs);
     color: var(--cli-text-dim);
     font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
   }
 
   .pane-status {
@@ -396,7 +407,7 @@
     --row-gap: var(--space-sm);
     padding: var(--space-sm) var(--space-md);
     background: var(--cli-error-bg);
-    border-bottom: 1px solid var(--cli-border);
+    border-bottom: 2px solid var(--cli-border);
     color: var(--cli-error);
   }
 
