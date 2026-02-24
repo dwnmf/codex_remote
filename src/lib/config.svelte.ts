@@ -2,7 +2,22 @@ const STORE_KEY = "__zane_config_store__";
 const STORAGE_KEY = "zane_config";
 
 const AUTH_URL = (import.meta.env.AUTH_URL ?? "").replace(/\/$/, "");
-const DEFAULT_WS_URL = AUTH_URL ? AUTH_URL.replace(/^https?:\/\//, "wss://") + "/ws/client" : "";
+
+function buildDefaultWsUrl(authUrl: string): string {
+  if (!authUrl) return "";
+  try {
+    const parsed = new URL(authUrl);
+    parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+    parsed.pathname = "/ws/client";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+const DEFAULT_WS_URL = buildDefaultWsUrl(AUTH_URL);
 
 interface SavedConfig {
   url: string;

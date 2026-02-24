@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "bunx --bun vite",
+    "dev:all": "bun --env-file .env bin/dev-local.ts",
     "build": "bunx --bun vite build",
     "preview": "bunx --bun vite preview --port 4173",
     "deploy": "bun run build && bunx wrangler pages deploy dist --project-name zane --branch main",

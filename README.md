@@ -75,6 +75,19 @@ On first run:
 
 This path deploys and uses your own Cloudflare account, and is the current generally available setup. Managed Orbit access is currently waitlist-only.
 
+### One-command local run (FastAPI + web + anchor)
+
+For local development without Cloudflare:
+
+```bash
+bun run dev:all
+```
+
+This reads `.env` and starts all three services in one terminal:
+- FastAPI control-plane on `http://localhost:8080`
+- Web client on `http://localhost:5173`
+- Anchor bridge connected to `ws://localhost:8080/ws/anchor`
+
 ## Local Mode (No Cloudflare)
 
 If your devices are on a trusted private network (e.g., Tailscale, WireGuard, or LAN), you can skip Cloudflare entirely and connect directly to Anchor.

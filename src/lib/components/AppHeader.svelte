@@ -92,7 +92,7 @@
 
         {#if showAnchorAlert}
             <span class="separator">·</span>
-            <span class="anchor-alert">No device connected</span>
+            <a class="anchor-alert anchor-alert-link" href="/device">Authorize device</a>
         {/if}
 
         {#if sandbox && onSandboxChange}
@@ -233,6 +233,14 @@
         color: var(--cli-warning);
         font-size: var(--text-xs);
         line-height: 1.4;
+    }
+
+    .anchor-alert-link {
+        text-decoration: none;
+    }
+
+    .anchor-alert-link:hover {
+        background: color-mix(in srgb, var(--cli-warning) 12%, transparent);
     }
 
     .thread-id {

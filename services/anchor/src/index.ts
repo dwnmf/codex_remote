@@ -708,6 +708,18 @@ type OrbitPreflightResult =
   | { ok: false; kind: "config"; detail: string }
   | { ok: false; kind: "network"; detail: string };
 
+function toHttpPreflightUrl(input: string): string | null {
+  try {
+    const url = new URL(input);
+    if (url.protocol === "ws:") url.protocol = "http:";
+    if (url.protocol === "wss:") url.protocol = "https:";
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 async function preflightOrbitConnection(): Promise<OrbitPreflightResult> {
   if (!ORBIT_URL) return { ok: true };
 
@@ -715,11 +727,15 @@ async function preflightOrbitConnection(): Promise<OrbitPreflightResult> {
   if (!orbitUrl) {
     return { ok: false, kind: "config", detail: "invalid ANCHOR_ORBIT_URL" };
   }
+  const preflightUrl = toHttpPreflightUrl(orbitUrl);
+  if (!preflightUrl) {
+    return { ok: false, kind: "config", detail: "ANCHOR_ORBIT_URL must be ws://, wss://, http:// or https://" };
+  }
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8_000);
-    const res = await fetch(orbitUrl, { method: "GET", signal: controller.signal });
+    const res = await fetch(preflightUrl, { method: "GET", signal: controller.signal });
     clearTimeout(timeout);
 
     // Gateway auth passes first, then Upgrade is checked. 426 means auth accepted.

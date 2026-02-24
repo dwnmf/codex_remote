@@ -502,11 +502,13 @@ async def ws_client(websocket: WebSocket):
     try:
         while True:
             message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
             if "text" in message and message["text"] is not None:
                 await hub.handle_message(websocket, "client", message["text"])
             elif "bytes" in message and message["bytes"] is not None:
                 await hub.handle_message(websocket, "client", message["bytes"].decode("utf-8", errors="ignore"))
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
         await hub.unregister(websocket, "client")
@@ -525,11 +527,13 @@ async def ws_anchor(websocket: WebSocket):
     try:
         while True:
             message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
             if "text" in message and message["text"] is not None:
                 await hub.handle_message(websocket, "anchor", message["text"])
             elif "bytes" in message and message["bytes"] is not None:
                 await hub.handle_message(websocket, "anchor", message["bytes"].decode("utf-8", errors="ignore"))
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
         await hub.unregister(websocket, "anchor")
