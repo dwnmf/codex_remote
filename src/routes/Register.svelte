@@ -5,11 +5,19 @@
 
   const authMode = (import.meta.env.AUTH_MODE ?? "passkey").toLowerCase();
   let newUsername = $state("");
+  let registrationStarted = $state(false);
   const isSignedIn = $derived(auth.status === "signed_in");
 
   $effect(() => {
-    if (isSignedIn) navigate("/app");
+    if (isSignedIn) navigate(registrationStarted ? "/device" : "/app");
   });
+
+  async function handleRegister() {
+    const username = newUsername.trim();
+    if (!username) return;
+    registrationStarted = true;
+    await auth.register(username);
+  }
 </script>
 
 <svelte:head>
@@ -32,13 +40,13 @@
     placeholder="Username"
     bind:value={newUsername}
     onkeydown={(e) => {
-      if (e.key === "Enter" && newUsername.trim()) auth.register(newUsername.trim());
+      if (e.key === "Enter" && newUsername.trim()) handleRegister();
     }}
   />
   <button
     class="primary-btn"
     type="button"
-    onclick={() => auth.register(newUsername.trim())}
+    onclick={handleRegister}
     disabled={auth.busy || !newUsername.trim()}
   >
     {auth.busy ? "Working..." : authMode === "basic" ? "Create account" : "Create passkey"}
