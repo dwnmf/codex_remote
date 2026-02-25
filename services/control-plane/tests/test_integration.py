@@ -87,6 +87,17 @@ def _recv_until(ws, predicate, max_messages: int = 20):
     raise AssertionError(f"Expected message not received. Seen={seen}")
 
 
+def _rpc_error_code(message: dict) -> str | None:
+    error = message.get("error")
+    if not isinstance(error, dict):
+        return None
+    data = error.get("data")
+    if not isinstance(data, dict):
+        return None
+    code = data.get("code")
+    return code if isinstance(code, str) else None
+
+
 def test_basic_auth_session_refresh_logout(tmp_path: Path, monkeypatch) -> None:
     client = _make_client(tmp_path, monkeypatch, auth_mode="basic")
     with client:
@@ -156,6 +167,13 @@ def test_websocket_relay_subscription_and_protocol_messages(tmp_path: Path, monk
             anchor_hello = anchor_ws.receive_json()
             assert anchor_hello["type"] == "orbit.hello"
             assert anchor_hello["role"] == "anchor"
+            anchor_ws.send_json({"type": "anchor.hello", "hostname": "integration-anchor", "platform": "linux", "anchorId": "anchor-one"})
+            anchor_ws.send_json({"type": "orbit.subscribe", "threadId": "thread-1"})
+            anchor_subscribed = _recv_until(
+                anchor_ws,
+                lambda msg: msg.get("type") == "orbit.subscribed" and msg.get("threadId") == "thread-1",
+            )
+            assert anchor_subscribed["threadId"] == "thread-1"
 
             with client.websocket_connect(f"/ws/client?token={web_token}&clientId=integration-client") as client_ws:
                 client_hello = _recv_until(client_ws, lambda msg: msg.get("type") == "orbit.hello")
@@ -202,6 +220,71 @@ def test_websocket_relay_subscription_and_protocol_messages(tmp_path: Path, monk
                 anchor_ws.send_json({"type": "ping"})
                 pong = _recv_until(anchor_ws, lambda msg: msg.get("type") == "pong")
                 assert pong["type"] == "pong"
+
+
+def test_websocket_targeted_routing_with_anchor_selection_and_errors(tmp_path: Path, monkeypatch) -> None:
+    client = _make_client(tmp_path, monkeypatch, auth_mode="basic")
+    with client:
+        username = f"user-{uuid.uuid4().hex[:8]}"
+        registered = _register_basic(client, username)
+        web_token = registered["token"]
+        anchor_tokens = _issue_anchor_tokens(client, web_token)
+        anchor_access = anchor_tokens["anchorAccessToken"]
+
+        with client.websocket_connect(f"/ws/anchor?token={anchor_access}") as anchor_a_ws:
+            assert anchor_a_ws.receive_json()["type"] == "orbit.hello"
+            anchor_a_ws.send_json({"type": "anchor.hello", "hostname": "anchor-a", "platform": "linux", "anchorId": "anchor-a"})
+
+            with client.websocket_connect(f"/ws/anchor?token={anchor_access}") as anchor_b_ws:
+                assert anchor_b_ws.receive_json()["type"] == "orbit.hello"
+                anchor_b_ws.send_json({"type": "anchor.hello", "hostname": "anchor-b", "platform": "linux", "anchorId": "anchor-b"})
+
+                with client.websocket_connect(f"/ws/client?token={web_token}&clientId=targeting-client") as client_ws:
+                    assert _recv_until(client_ws, lambda msg: msg.get("type") == "orbit.hello")["role"] == "client"
+
+                    client_ws.send_json({"type": "orbit.list-anchors"})
+                    anchors_msg = _recv_until(client_ws, lambda msg: msg.get("type") == "orbit.anchors")
+                    anchors = anchors_msg.get("anchors") or []
+                    assert len(anchors) == 2
+
+                    client_ws.send_json({"id": 900, "method": "thread/start", "params": {"cwd": ".", "anchorId": "anchor-a"}})
+                    relayed_start = _recv_until(
+                        anchor_a_ws,
+                        lambda msg: msg.get("id") == 900 and msg.get("method") == "thread/start",
+                    )
+                    assert relayed_start.get("params", {}).get("anchorId") == "anchor-a"
+
+                    anchor_a_ws.send_json({"id": 900, "result": {"thread": {"id": "thread-target"}}})
+                    started = _recv_until(client_ws, lambda msg: msg.get("id") == 900 and isinstance(msg.get("result"), dict))
+                    assert started.get("result", {}).get("thread", {}).get("id") == "thread-target"
+
+                    client_ws.send_json({"id": 901, "method": "turn/start", "params": {"threadId": "thread-target", "input": []}})
+                    relayed_turn = _recv_until(
+                        anchor_a_ws,
+                        lambda msg: msg.get("id") == 901 and msg.get("method") == "turn/start",
+                    )
+                    assert relayed_turn.get("params", {}).get("threadId") == "thread-target"
+
+                    client_ws.send_json(
+                        {
+                            "id": 902,
+                            "method": "turn/start",
+                            "params": {"threadId": "thread-target", "input": [], "anchorId": "anchor-b"},
+                        }
+                    )
+                    mismatch = _recv_until(client_ws, lambda msg: msg.get("id") == 902 and msg.get("error"))
+                    assert _rpc_error_code(mismatch) == "thread_anchor_mismatch"
+
+                    client_ws.send_json({"id": 903, "method": "thread/start", "params": {"cwd": ".", "anchorId": "missing-anchor"}})
+                    missing = _recv_until(client_ws, lambda msg: msg.get("id") == 903 and msg.get("error"))
+                    assert _rpc_error_code(missing) == "anchor_not_found"
+
+                    anchor_a_ws.close()
+                    _recv_until(client_ws, lambda msg: msg.get("type") == "orbit.anchor-disconnected" and msg.get("anchorId") == "anchor-a")
+
+                    client_ws.send_json({"id": 904, "method": "turn/start", "params": {"threadId": "thread-target", "input": []}})
+                    offline = _recv_until(client_ws, lambda msg: msg.get("id") == 904 and msg.get("error"))
+                    assert _rpc_error_code(offline) == "anchor_offline"
 
 
 def test_anchor_reconnect_after_disconnect(tmp_path: Path, monkeypatch) -> None:

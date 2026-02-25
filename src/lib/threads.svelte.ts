@@ -2,6 +2,8 @@ import type { ApprovalPolicy, CollaborationMode, CollaborationModeMask, ModeKind
 import { socket } from "./socket.svelte";
 import { messages } from "./messages.svelte";
 import { models } from "./models.svelte";
+import { anchors } from "./anchors.svelte";
+import { auth } from "./auth.svelte";
 import { navigate } from "../router";
 
 const STORE_KEY = "__zane_threads_store__";
@@ -63,14 +65,16 @@ class ThreadsStore {
     const id = this.#nextId++;
     this.loading = true;
     this.#pendingRequests.set(id, "list");
+    const anchorId = this.#resolveAnchorIdForRequest(false);
     socket.send({
       method: "thread/list",
       id,
-      params: { cursor: null, limit: 25 },
+      params: { cursor: null, limit: 25, ...(anchorId ? { anchorId } : {}) },
     });
   }
 
   open(threadId: string) {
+    const anchorId = this.#resolveAnchorIdForRequest(false);
     const id = this.#nextId++;
     this.loading = true;
     this.currentId = threadId;
@@ -80,7 +84,7 @@ class ThreadsStore {
     socket.send({
       method: "thread/resume",
       id,
-      params: { threadId },
+      params: { threadId, ...(anchorId ? { anchorId } : {}) },
     });
   }
 
@@ -102,10 +106,11 @@ class ThreadsStore {
   fetchCollaborationPresets() {
     const id = this.#nextId++;
     this.#pendingRequests.set(id, "collaborationPresets");
+    const anchorId = this.#resolveAnchorIdForRequest(false);
     socket.send({
       method: "collaborationMode/list",
       id,
-      params: {},
+      params: anchorId ? { anchorId } : {},
     });
   }
 
@@ -128,13 +133,14 @@ class ThreadsStore {
   }
 
   archive(threadId: string) {
+    const anchorId = this.#resolveAnchorIdForRequest(false);
     const id = this.#nextId++;
     this.#pendingRequests.set(id, "archive");
     socket.unsubscribeThread(threadId);
     socket.send({
       method: "thread/archive",
       id,
-      params: { threadId },
+      params: { threadId, ...(anchorId ? { anchorId } : {}) },
     });
     this.list = this.list.filter((t) => t.id !== threadId);
     if (this.currentId === threadId) {
@@ -165,6 +171,9 @@ class ThreadsStore {
       if (type === "list" && msg.result) {
         const result = msg.result as { data: ThreadInfo[] };
         this.list = result.data || [];
+        this.loading = false;
+      }
+      if (type === "list" && msg.error) {
         this.loading = false;
       }
 
@@ -226,12 +235,14 @@ class ThreadsStore {
     }
 
     if (pending?.input) {
+      const anchorId = this.#resolveAnchorIdForRequest(false);
       socket.send({
         method: "turn/start",
         id: this.#nextId++,
         params: {
           threadId: thread.id,
           input: [{ type: "text", text: pending.input }],
+          ...(anchorId ? { anchorId } : {}),
           ...(pending.collaborationMode
             ? { collaborationMode: pending.collaborationMode }
             : {}),
@@ -275,6 +286,21 @@ class ThreadsStore {
       collaborationMode?: CollaborationMode;
     }
   ) {
+    const anchorId = this.#resolveAnchorIdForRequest(true);
+    if (!anchorId && !auth.isLocalMode) {
+      const message = this.#getAnchorErrorMessage();
+      const pending: PendingStart = {
+        input: input?.trim() ? input.trim() : null,
+        model: this.#resolveStartModel(options?.collaborationMode),
+        collaborationMode: options?.collaborationMode ?? null,
+        suppressNavigation: options?.suppressNavigation ?? false,
+        onThreadStarted: options?.onThreadStarted ?? null,
+        onThreadStartFailed: options?.onThreadStartFailed ?? null,
+      };
+      this.#handleStartFailure({ message }, pending);
+      throw new Error(message);
+    }
+
     const requestedModel = this.#resolveStartModel(options?.collaborationMode);
     const id = this.#nextId++;
     const pending: PendingStart = {
@@ -292,6 +318,7 @@ class ThreadsStore {
       id,
       params: {
         cwd,
+        ...(anchorId ? { anchorId } : {}),
         ...(requestedModel ? { model: requestedModel } : {}),
         ...(options?.approvalPolicy ? { approvalPolicy: options.approvalPolicy } : {}),
         ...(options?.sandbox ? { sandbox: options.sandbox } : {}),
@@ -317,6 +344,21 @@ class ThreadsStore {
     if (pending?.onThreadStartFailed) {
       pending.onThreadStartFailed(new Error(message));
     }
+  }
+
+  #resolveAnchorIdForRequest(requireOnline: boolean): string | null {
+    if (auth.isLocalMode) return null;
+    if (!anchors.selectedId) return null;
+    if (!requireOnline) return anchors.selectedId;
+    return anchors.selected?.id ?? null;
+  }
+
+  #getAnchorErrorMessage(): string {
+    if (auth.isLocalMode) return "Failed to start thread";
+    if (anchors.list.length === 0) return "No devices are connected.";
+    if (!anchors.selectedId) return "Select a device in Settings before creating a session.";
+    if (!anchors.selected) return "Selected device is offline. Choose another device in Settings.";
+    return "Failed to start thread";
   }
 
   #getErrorMessage(error: unknown): string {

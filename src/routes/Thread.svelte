@@ -5,6 +5,8 @@
     import { threads } from "../lib/threads.svelte";
     import { messages } from "../lib/messages.svelte";
     import { models } from "../lib/models.svelte";
+    import { anchors } from "../lib/anchors.svelte";
+    import { auth } from "../lib/auth.svelte";
     import { theme } from "../lib/theme.svelte";
     import AppHeader from "../lib/components/AppHeader.svelte";
     import MessageBlock from "../lib/components/MessageBlock.svelte";
@@ -86,9 +88,22 @@
 
         sendError = null;
 
+        const selectedAnchorId = !auth.isLocalMode ? anchors.selectedId : null;
+        if (!auth.isLocalMode) {
+            if (!selectedAnchorId) {
+                sendError = "Select a device in Settings before sending messages.";
+                return;
+            }
+            if (!anchors.selected) {
+                sendError = "Selected device is offline. Choose another device in Settings.";
+                return;
+            }
+        }
+
         const params: Record<string, unknown> = {
             threadId,
             input: [{ type: "text", text: inputText }],
+            ...(selectedAnchorId ? { anchorId: selectedAnchorId } : {}),
         };
 
         if (model.trim()) {

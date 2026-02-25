@@ -1,5 +1,7 @@
 import type { ModelOption, ReasoningEffort, RpcMessage } from "./types";
 import { socket } from "./socket.svelte";
+import { anchors } from "./anchors.svelte";
+import { auth } from "./auth.svelte";
 
 type FetchStatus = "idle" | "loading" | "success" | "error";
 
@@ -41,7 +43,7 @@ class ModelsStore {
     socket.send({
       method: "model/list",
       id: this.#requestId,
-      params: {},
+      params: !auth.isLocalMode && anchors.selectedId ? { anchorId: anchors.selectedId } : {},
     });
   }
 

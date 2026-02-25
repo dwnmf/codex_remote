@@ -30,3 +30,26 @@ def extract_thread_id(message: dict[str, Any]) -> str | None:
         if isinstance(candidate, int):
             return str(candidate)
     return None
+
+
+def extract_anchor_id(message: dict[str, Any]) -> str | None:
+    params = as_record(message.get("params"))
+    result = as_record(message.get("result"))
+    anchor_from_params = as_record(params.get("anchor")) if params else None
+    anchor_from_result = as_record(result.get("anchor")) if result else None
+
+    candidates: list[Any] = [
+        params.get("anchorId") if params else None,
+        params.get("anchor_id") if params else None,
+        result.get("anchorId") if result else None,
+        result.get("anchor_id") if result else None,
+        anchor_from_params.get("id") if anchor_from_params else None,
+        anchor_from_result.get("id") if anchor_from_result else None,
+    ]
+
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate
+        if isinstance(candidate, int):
+            return str(candidate)
+    return None

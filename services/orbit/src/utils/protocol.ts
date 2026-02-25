@@ -37,6 +37,29 @@ export function extractThreadId(message: Record<string, unknown>): string | null
   return null;
 }
 
+export function extractAnchorId(message: Record<string, unknown>): string | null {
+  const params = asRecord(message.params);
+  const result = asRecord(message.result);
+  const anchorFromParams = asRecord(params?.anchor);
+  const anchorFromResult = asRecord(result?.anchor);
+
+  const candidates = [
+    params?.anchorId,
+    params?.anchor_id,
+    result?.anchorId,
+    result?.anchor_id,
+    anchorFromParams?.id,
+    anchorFromResult?.id,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate;
+    if (typeof candidate === "number") return String(candidate);
+  }
+
+  return null;
+}
+
 export function extractTurnId(message: Record<string, unknown>): string | null {
   const params = asRecord(message.params);
   const result = asRecord(message.result);

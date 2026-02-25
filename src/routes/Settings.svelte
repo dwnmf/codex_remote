@@ -11,6 +11,7 @@
   const themeIcons = { system: "◐", light: "○", dark: "●" } as const;
 
   const anchorList = $derived(anchors.list);
+  const selectedAnchorId = $derived(anchors.selectedId);
 
   const platformLabels: Record<string, string> = {
     darwin: "macOS",
@@ -41,6 +42,10 @@
       hour: "2-digit",
       minute: "2-digit",
     });
+  }
+
+  function handleSelectAnchor(anchorId: string) {
+    anchors.select(anchorId);
   }
 
 </script>
@@ -119,14 +124,28 @@
           <ul class="anchor-list">
             {#each anchorList as anchor (anchor.id)}
               <li class="anchor-item">
-                <span class="anchor-status" title="Connected">●</span>
+                <button
+                  type="button"
+                  class="anchor-select"
+                  class:selected={selectedAnchorId === anchor.id}
+                  onclick={() => handleSelectAnchor(anchor.id)}
+                  aria-pressed={selectedAnchorId === anchor.id}
+                >
+                  <span class="anchor-status" title="Connected">●</span>
+                </button>
                 <div class="anchor-info">
                   <span class="anchor-hostname">{anchor.hostname}</span>
                   <span class="anchor-meta">{platformLabels[anchor.platform] ?? anchor.platform} · since {formatSince(anchor.connectedAt)}</span>
                 </div>
+                {#if selectedAnchorId === anchor.id}
+                  <span class="anchor-selected-label">Selected</span>
+                {/if}
               </li>
             {/each}
           </ul>
+          {#if !selectedAnchorId}
+            <p class="hint hint-error">Select a device. New sessions will start only on the selected device.</p>
+          {/if}
         {/if}
       </div>
     </div>
@@ -261,10 +280,28 @@
     padding: var(--space-xs) 0;
   }
 
+  .anchor-select {
+    border: 1px solid var(--cli-border);
+    background: transparent;
+    border-radius: 999px;
+    width: 1.2rem;
+    height: 1.2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .anchor-select.selected {
+    border-color: var(--cli-prefix-agent);
+    background: color-mix(in srgb, var(--cli-prefix-agent) 22%, transparent);
+  }
+
   .anchor-status {
     font-size: var(--text-xs);
     color: var(--cli-success, #4ade80);
-    margin-top: 2px;
+    margin-top: 1px;
   }
 
   .anchor-info {
@@ -282,6 +319,15 @@
   .anchor-meta {
     color: var(--cli-text-muted);
     font-size: var(--text-xs);
+  }
+
+  .anchor-selected-label {
+    margin-left: auto;
+    color: var(--cli-prefix-agent);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding-top: 2px;
   }
 
   .hint {

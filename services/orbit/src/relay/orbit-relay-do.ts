@@ -1,12 +1,17 @@
 import { sendPush, type PushPayload, type VapidKeys } from "../push";
 import type { Env, Role } from "../types";
-import { asRecord, extractMethod, extractThreadId, parseJsonMessage } from "../utils/protocol";
+import { asRecord, extractAnchorId, extractMethod, extractThreadId, parseJsonMessage } from "../utils/protocol";
 
 interface AnchorMeta {
   id: string;
   hostname: string;
   platform: string;
   connectedAt: string;
+}
+
+interface RouteFailure {
+  code: string;
+  message: string;
 }
 
 export class OrbitRelay {
@@ -17,12 +22,17 @@ export class OrbitRelay {
   private clientSockets = new Map<WebSocket, Set<string>>();
   private anchorSockets = new Map<WebSocket, Set<string>>();
   private anchorMeta = new Map<WebSocket, AnchorMeta>();
+  private anchorIdToSocket = new Map<string, WebSocket>();
+  private socketToAnchorId = new Map<WebSocket, string>();
   private clientIdToSocket = new Map<string, WebSocket>();
   private socketToClientId = new Map<WebSocket, string>();
 
   // Thread ID -> subscribed sockets (reverse index for fast routing)
   private threadToClients = new Map<string, Set<WebSocket>>();
   private threadToAnchors = new Map<string, Set<WebSocket>>();
+  private threadToAnchorId = new Map<string, string>();
+  private pendingClientRequests = new Map<string, WebSocket>(); // (anchorSocket,id) -> clientSocket
+  private pendingAnchorRequests = new Map<string, WebSocket>(); // (clientSocket,id) -> anchorSocket
 
   constructor(_state: DurableObjectState, env: Env) {
     this.env = env;
@@ -123,6 +133,12 @@ export class OrbitRelay {
 
     if (msg.type === "orbit.subscribe" && typeof msg.threadId === "string") {
       this.subscribeSocket(socket, role, msg.threadId);
+      if (role === "anchor") {
+        const anchorId = this.anchorMeta.get(socket)?.id;
+        if (anchorId) {
+          this.threadToAnchorId.set(msg.threadId, anchorId);
+        }
+      }
       try {
         socket.send(JSON.stringify({ type: "orbit.subscribed", threadId: msg.threadId }));
       } catch {
@@ -181,14 +197,31 @@ export class OrbitRelay {
   private handleAnchorHello(socket: WebSocket, role: Role, msg: Record<string, unknown> | null): boolean {
     if (!msg || role !== "anchor" || msg.type !== "anchor.hello") return false;
 
+    const explicitAnchorId =
+      (typeof msg.anchorId === "string" && msg.anchorId.trim() ? msg.anchorId.trim() : null) ||
+      (typeof msg.deviceId === "string" && msg.deviceId.trim() ? msg.deviceId.trim() : null);
+    const anchorId = explicitAnchorId ?? crypto.randomUUID();
+
+    const existing = this.anchorIdToSocket.get(anchorId);
+    if (existing && existing !== socket) {
+      this.removeSocket(existing, "anchor");
+      try {
+        existing.close(1000, "Replaced by newer connection");
+      } catch {
+        // ignore
+      }
+    }
+
     const meta: AnchorMeta = {
-      id: crypto.randomUUID(),
+      id: anchorId,
       hostname: typeof msg.hostname === "string" ? msg.hostname : "unknown",
       platform: typeof msg.platform === "string" ? msg.platform : "unknown",
       connectedAt: typeof msg.ts === "string" ? msg.ts : new Date().toISOString(),
     };
 
     this.anchorMeta.set(socket, meta);
+    this.anchorIdToSocket.set(meta.id, socket);
+    this.socketToAnchorId.set(socket, meta.id);
 
     const notification = JSON.stringify({ type: "orbit.anchor-connected", anchor: meta });
     for (const clientSocket of this.clientSockets.keys()) {
@@ -264,9 +297,15 @@ export class OrbitRelay {
           this.clientIdToSocket.delete(clientId);
         }
       }
-    }
+    } else {
+      const anchorId = this.socketToAnchorId.get(socket);
+      if (anchorId) {
+        this.socketToAnchorId.delete(socket);
+        if (this.anchorIdToSocket.get(anchorId) === socket) {
+          this.anchorIdToSocket.delete(anchorId);
+        }
+      }
 
-    if (role === "anchor") {
       const meta = this.anchorMeta.get(socket);
       if (meta) {
         this.anchorMeta.delete(socket);
@@ -280,60 +319,195 @@ export class OrbitRelay {
         }
       }
     }
+
+    const removedSocketId = this.socketId(socket);
+
+    for (const [key, target] of this.pendingClientRequests.entries()) {
+      if (target === socket || key.startsWith(`${removedSocketId}:`)) {
+        this.pendingClientRequests.delete(key);
+      }
+    }
+
+    for (const [key, target] of this.pendingAnchorRequests.entries()) {
+      if (target === socket || key.startsWith(`${removedSocketId}:`)) {
+        this.pendingAnchorRequests.delete(key);
+      }
+    }
   }
 
   private routeMessage(socket: WebSocket, role: Role, data: string | ArrayBuffer | ArrayBufferView, msg: Record<string, unknown> | null): void {
     const threadId = msg ? extractThreadId(msg) : null;
+    const anchorId = msg ? extractAnchorId(msg) : null;
+    const requestId = this.extractMessageId(msg);
+    const requestKey = this.messageIdKey(requestId);
+    const hasMethod = typeof msg?.method === "string";
 
     if (role === "client") {
-      // TODO: broadcasts to all anchors — won't scale if multiple anchors serve distinct threads
-      for (const target of this.anchorSockets.keys()) {
-        try {
-          target.send(data);
-        } catch (err) {
-          console.warn("[orbit] failed to relay message", err);
-        }
-      }
-    } else {
-      // Anchor → client: thread-scoped messages go to subscribers only
-      if (threadId) {
-        const targets = this.threadToClients.get(threadId);
-        if (targets && targets.size > 0) {
-          for (const target of targets) {
-            try {
-              target.send(data);
-            } catch (err) {
-              console.warn("[orbit] failed to relay message", err);
-            }
-          }
-        } else {
-          // No subscribers yet (e.g. thread/start response) — broadcast to all clients
-          for (const target of this.clientSockets.keys()) {
-            try {
-              target.send(data);
-            } catch (err) {
-              console.warn("[orbit] failed to relay message", err);
-            }
-          }
-        }
-      } else {
-        // No threadId — broadcast to all clients
-        for (const target of this.clientSockets.keys()) {
-          try {
-            target.send(data);
-          } catch (err) {
-            console.warn("[orbit] failed to relay message", err);
-          }
+      if (requestKey && !hasMethod) {
+        const responseTarget = this.pendingAnchorRequests.get(this.routeKey(socket, requestKey));
+        if (responseTarget) {
+          this.pendingAnchorRequests.delete(this.routeKey(socket, requestKey));
+          this.sendToSocket(responseTarget, data);
+          return;
         }
       }
 
-      // Send push notification for blocking events (async, non-blocking)
-      if (msg) {
-        const method = extractMethod(msg);
-        if (method && this.isPushWorthy(method)) {
-          this.sendPushNotifications(msg, method, threadId);
+      const resolved = this.resolveClientTarget(threadId, anchorId);
+      if (!resolved.target) {
+        this.sendRpcError(socket, requestId, resolved.failure);
+        return;
+      }
+
+      if (threadId) {
+        const boundAnchorId = this.socketToAnchorId.get(resolved.target);
+        if (boundAnchorId) {
+          this.threadToAnchorId.set(threadId, boundAnchorId);
         }
       }
+
+      if (requestKey && hasMethod) {
+        this.pendingClientRequests.set(this.routeKey(resolved.target, requestKey), socket);
+      }
+
+      this.sendToSocket(resolved.target, data);
+      return;
+    }
+
+    if (requestKey && !hasMethod) {
+      const sourceAnchorId = this.socketToAnchorId.get(socket);
+      if (threadId && sourceAnchorId) {
+        this.threadToAnchorId.set(threadId, sourceAnchorId);
+      }
+      const responseTarget = this.pendingClientRequests.get(this.routeKey(socket, requestKey));
+      if (responseTarget) {
+        this.pendingClientRequests.delete(this.routeKey(socket, requestKey));
+        this.sendToSocket(responseTarget, data);
+        return;
+      }
+    }
+
+    const sourceAnchorId = this.socketToAnchorId.get(socket);
+    if (threadId && sourceAnchorId) {
+      this.threadToAnchorId.set(threadId, sourceAnchorId);
+    }
+
+    const targets =
+      threadId && this.threadToClients.get(threadId) && this.threadToClients.get(threadId)!.size > 0
+        ? Array.from(this.threadToClients.get(threadId)!)
+        : Array.from(this.clientSockets.keys());
+
+    if (requestKey && hasMethod) {
+      for (const target of targets) {
+        this.pendingAnchorRequests.set(this.routeKey(target, requestKey), socket);
+      }
+    }
+
+    for (const target of targets) {
+      this.sendToSocket(target, data);
+    }
+
+    // Send push notification for blocking events (async, non-blocking)
+    if (msg) {
+      const method = extractMethod(msg);
+      if (method && this.isPushWorthy(method)) {
+        this.sendPushNotifications(msg, method, threadId);
+      }
+    }
+  }
+
+  private resolveClientTarget(threadId: string | null, anchorId: string | null): { target: WebSocket | null; failure: RouteFailure | null } {
+    if (anchorId) {
+      const target = this.anchorIdToSocket.get(anchorId);
+      if (!target) {
+        return { target: null, failure: { code: "anchor_not_found", message: "Selected device is unavailable." } };
+      }
+      if (threadId) {
+        const bound = this.threadToAnchorId.get(threadId);
+        if (bound && bound !== anchorId) {
+          return { target: null, failure: { code: "thread_anchor_mismatch", message: "Thread is attached to another device." } };
+        }
+      }
+      return { target, failure: null };
+    }
+
+    if (threadId) {
+      const boundAnchorId = this.threadToAnchorId.get(threadId);
+      if (boundAnchorId) {
+        const target = this.anchorIdToSocket.get(boundAnchorId);
+        if (target) return { target, failure: null };
+        return { target: null, failure: { code: "anchor_offline", message: "Device for this thread is offline." } };
+      }
+
+      const subscribed = Array.from(this.threadToAnchors.get(threadId) ?? []);
+      if (subscribed.length === 1) {
+        return { target: subscribed[0], failure: null };
+      }
+      if (subscribed.length > 1) {
+        return {
+          target: null,
+          failure: { code: "thread_anchor_mismatch", message: "Thread is attached to multiple devices." },
+        };
+      }
+    }
+
+    const anchors = Array.from(this.anchorSockets.keys());
+    if (anchors.length === 1) {
+      return { target: anchors[0], failure: null };
+    }
+    if (anchors.length === 0) {
+      return { target: null, failure: { code: "anchor_offline", message: "No devices are connected." } };
+    }
+    return { target: null, failure: { code: "anchor_required", message: "Select a device before starting a request." } };
+  }
+
+  private extractMessageId(msg: Record<string, unknown> | null): string | number | null {
+    if (!msg) return null;
+    const value = msg.id;
+    if (typeof value === "string" && value.trim()) return value;
+    if (typeof value === "number") return value;
+    return null;
+  }
+
+  private messageIdKey(id: string | number | null): string | null {
+    if (id == null) return null;
+    return String(id);
+  }
+
+  private routeKey(source: WebSocket, id: string): string {
+    return `${this.socketId(source)}:${id}`;
+  }
+
+  private socketId(socket: WebSocket): string {
+    const anySocket = socket as unknown as { __orbit_socket_id?: string };
+    if (!anySocket.__orbit_socket_id) {
+      anySocket.__orbit_socket_id = crypto.randomUUID();
+    }
+    return anySocket.__orbit_socket_id;
+  }
+
+  private sendToSocket(target: WebSocket, data: string | ArrayBuffer | ArrayBufferView): void {
+    try {
+      target.send(data);
+    } catch (err) {
+      console.warn("[orbit] failed to relay message", err);
+    }
+  }
+
+  private sendRpcError(socket: WebSocket, requestId: string | number | null, failure: RouteFailure | null): void {
+    if (requestId == null || !failure) return;
+    try {
+      socket.send(
+        JSON.stringify({
+          id: requestId,
+          error: {
+            code: -32001,
+            message: failure.message,
+            data: { code: failure.code },
+          },
+        })
+      );
+    } catch {
+      // ignore
     }
   }
 

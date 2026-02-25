@@ -16,6 +16,7 @@ let USER_ID: string | undefined;
 let ANCHOR_ACCESS_TOKEN = "";
 let ANCHOR_REFRESH_TOKEN = "";
 let ANCHOR_ACCESS_EXPIRES_AT_MS = 0;
+let ANCHOR_ID = "";
 
 const ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
 
@@ -648,6 +649,7 @@ async function refreshAnchorAccessToken(): Promise<boolean> {
     if (USER_ID) {
       await saveCredentials({
         userId: USER_ID,
+        anchorId: ANCHOR_ID || undefined,
         anchorAccessToken: ANCHOR_ACCESS_TOKEN,
         anchorRefreshToken: ANCHOR_REFRESH_TOKEN,
         anchorAccessExpiresAtMs: ANCHOR_ACCESS_EXPIRES_AT_MS,
@@ -803,12 +805,7 @@ async function connectOrbit(): Promise<void> {
   ws.addEventListener("open", () => {
     opened = true;
     orbitConnecting = false;
-    ws.send(JSON.stringify({
-      type: "anchor.hello",
-      ts: new Date().toISOString(),
-      hostname: hostname(),
-      platform: process.platform,
-    }));
+    ws.send(JSON.stringify(buildAnchorHelloPayload()));
     console.log("[anchor] connected to orbit");
     startOrbitHeartbeat(ws);
     resubscribeAllThreads();
@@ -933,6 +930,7 @@ async function streamLines(
 
 interface Credentials {
   userId: string;
+  anchorId?: string;
   anchorJwtSecret?: string;
   anchorAccessToken?: string;
   anchorRefreshToken?: string;
@@ -949,6 +947,7 @@ async function loadCredentials(): Promise<Credentials | null> {
     if (data.anchorAccessToken && data.anchorRefreshToken) {
       return {
         userId: data.userId,
+        anchorId: typeof data.anchorId === "string" ? data.anchorId : undefined,
         anchorAccessToken: data.anchorAccessToken,
         anchorRefreshToken: data.anchorRefreshToken,
         anchorAccessExpiresAtMs:
@@ -958,7 +957,11 @@ async function loadCredentials(): Promise<Credentials | null> {
     }
 
     if (data.anchorJwtSecret) {
-      return { userId: data.userId, anchorJwtSecret: data.anchorJwtSecret };
+      return {
+        userId: data.userId,
+        anchorId: typeof data.anchorId === "string" ? data.anchorId : undefined,
+        anchorJwtSecret: data.anchorJwtSecret,
+      };
     }
   } catch {
     // File doesn't exist or is invalid
@@ -994,6 +997,16 @@ async function saveCredentials(creds: Credentials): Promise<void> {
   } catch (err) {
     console.warn("[anchor] could not save credentials", err);
   }
+}
+
+function buildAnchorHelloPayload() {
+  return {
+    type: "anchor.hello",
+    ts: new Date().toISOString(),
+    hostname: hostname(),
+    platform: process.platform,
+    anchorId: ANCHOR_ID,
+  };
 }
 
 async function deviceLogin(): Promise<boolean> {
@@ -1065,6 +1078,7 @@ async function deviceLogin(): Promise<boolean> {
           ANCHOR_ACCESS_EXPIRES_AT_MS = Date.now() + tokenData.anchorAccessExpiresIn * 1000;
           await saveCredentials({
             userId: USER_ID,
+            anchorId: ANCHOR_ID || undefined,
             anchorAccessToken: ANCHOR_ACCESS_TOKEN,
             anchorRefreshToken: ANCHOR_REFRESH_TOKEN,
             anchorAccessExpiresAtMs: ANCHOR_ACCESS_EXPIRES_AT_MS,
@@ -1076,7 +1090,11 @@ async function deviceLogin(): Promise<boolean> {
 
         if (tokenData.anchorJwtSecret) {
           ZANE_ANCHOR_JWT_SECRET = tokenData.anchorJwtSecret;
-          await saveCredentials({ userId: USER_ID, anchorJwtSecret: ZANE_ANCHOR_JWT_SECRET });
+          await saveCredentials({
+            userId: USER_ID,
+            anchorId: ANCHOR_ID || undefined,
+            anchorJwtSecret: ZANE_ANCHOR_JWT_SECRET,
+          });
           console.log("  \x1b[32mAuthorised!\x1b[0m Credentials saved.\n");
           return true;
         }
@@ -1126,12 +1144,7 @@ const server = Bun.serve({
     open(ws) {
       clients.add(ws as WsClient);
       ensureAppServer();
-      ws.send(JSON.stringify({
-        type: "anchor.hello",
-        ts: new Date().toISOString(),
-        hostname: hostname(),
-        platform: process.platform,
-      }));
+      ws.send(JSON.stringify(buildAnchorHelloPayload()));
     },
     message(ws, message) {
       const text = typeof message === "string" ? message : new TextDecoder().decode(message);
@@ -1181,6 +1194,21 @@ async function startup() {
     ANCHOR_REFRESH_TOKEN = saved.anchorRefreshToken ?? "";
     ANCHOR_ACCESS_EXPIRES_AT_MS = saved.anchorAccessExpiresAtMs ?? 0;
     USER_ID = saved.userId;
+    ANCHOR_ID = saved.anchorId ?? "";
+  }
+
+  if (!ANCHOR_ID) {
+    ANCHOR_ID = crypto.randomUUID();
+    if (USER_ID) {
+      await saveCredentials({
+        userId: USER_ID,
+        anchorId: ANCHOR_ID,
+        anchorAccessToken: ANCHOR_ACCESS_TOKEN || undefined,
+        anchorRefreshToken: ANCHOR_REFRESH_TOKEN || undefined,
+        anchorAccessExpiresAtMs: ANCHOR_ACCESS_EXPIRES_AT_MS || undefined,
+        anchorJwtSecret: ZANE_ANCHOR_JWT_SECRET || undefined,
+      });
+    }
   }
 
   const hasDeviceTokens = Boolean(ANCHOR_ACCESS_TOKEN && ANCHOR_REFRESH_TOKEN);
