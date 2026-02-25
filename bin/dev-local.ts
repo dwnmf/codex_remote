@@ -23,10 +23,40 @@ type ProcSpec = {
   env?: Record<string, string | undefined>;
 };
 
-const backendCmd =
-  process.platform === "win32"
-    ? ["py", "-3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", String(backendPort)]
-    : ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", String(backendPort)];
+function resolveBackendCmd(): string[] {
+  const candidates =
+    process.platform === "win32"
+      ? [
+          ["py", "-3"],
+          ["python"],
+          ["python3"],
+        ]
+      : [
+          ["python3"],
+          ["python"],
+        ];
+
+  for (const candidate of candidates) {
+    const executable = candidate[0];
+    if (!Bun.which(executable)) continue;
+    return [
+      ...candidate,
+      "-m",
+      "uvicorn",
+      "app.main:app",
+      "--host",
+      "0.0.0.0",
+      "--port",
+      String(backendPort),
+    ];
+  }
+
+  const tried = candidates.map((c) => c[0]).join(", ");
+  console.error(`[dev:all] no Python launcher found in PATH (tried: ${tried})`);
+  process.exit(1);
+}
+
+const backendCmd = resolveBackendCmd();
 
 const specs: ProcSpec[] = [
   {
