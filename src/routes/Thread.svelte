@@ -8,6 +8,14 @@
     import { anchors } from "../lib/anchors.svelte";
     import { auth } from "../lib/auth.svelte";
     import { theme } from "../lib/theme.svelte";
+    import {
+        buildUlwContinuationPrompt,
+        buildUlwKickoffPrompt,
+        hasCompletionPromise,
+        parseUlwCommand,
+        pickUlwTaskFromMessages,
+        ulwRuntime,
+    } from "../lib/ulw";
     import AppHeader from "../lib/components/AppHeader.svelte";
     import MessageBlock from "../lib/components/MessageBlock.svelte";
     import ApprovalPrompt from "../lib/components/ApprovalPrompt.svelte";
@@ -82,9 +90,19 @@
     });
 
     let sendError = $state<string | null>(null);
+    let ulwTurnCleanup: (() => void) | null = null;
 
-    function handleSubmit(inputText: string) {
-        if (!inputText || !threadId) return;
+    function clearUlwTurnCallback() {
+        if (!ulwTurnCleanup) return;
+        ulwTurnCleanup();
+        ulwTurnCleanup = null;
+    }
+
+    function sendTurnText(targetThreadId: string, inputText: string): boolean {
+        if (!inputText) return false;
+
+        const normalizedInput = inputText.trim();
+        if (!normalizedInput) return false;
 
         sendError = null;
 
@@ -92,17 +110,17 @@
         if (!auth.isLocalMode) {
             if (!selectedAnchorId) {
                 sendError = "Select a device in Settings before sending messages.";
-                return;
+                return false;
             }
             if (!anchors.selected) {
                 sendError = "Selected device is offline. Choose another device in Settings.";
-                return;
+                return false;
             }
         }
 
         const params: Record<string, unknown> = {
-            threadId,
-            input: [{ type: "text", text: inputText }],
+            threadId: targetThreadId,
+            input: [{ type: "text", text: normalizedInput }],
             ...(selectedAnchorId ? { anchorId: selectedAnchorId } : {}),
         };
 
@@ -137,11 +155,116 @@
 
         if (!result.success) {
             sendError = result.error ?? "Failed to send message";
+            return false;
         }
+
+        return true;
     }
+
+    function registerUlwTurnCallback(targetThreadId: string) {
+        clearUlwTurnCallback();
+        ulwTurnCleanup = messages.onTurnComplete(targetThreadId, (finishedThreadId, finalText) => {
+            ulwTurnCleanup = null;
+            const state = ulwRuntime.get(finishedThreadId);
+            if (!state?.active) return;
+
+            if (hasCompletionPromise(finalText, state.completionPromise)) {
+                ulwRuntime.stop(finishedThreadId, "promise_matched");
+                return;
+            }
+
+            if (state.iteration >= state.maxIterations) {
+                ulwRuntime.stop(finishedThreadId, "max_iterations");
+                return;
+            }
+
+            const next = ulwRuntime.advance(finishedThreadId);
+            if (!next) return;
+
+            registerUlwTurnCallback(finishedThreadId);
+            const sent = sendTurnText(finishedThreadId, buildUlwContinuationPrompt(next));
+            if (!sent) {
+                clearUlwTurnCallback();
+                ulwRuntime.stop(finishedThreadId, "send_error");
+            }
+        });
+    }
+
+    function handleSubmit(inputText: string) {
+        if (!threadId) return;
+
+        const normalizedInput = inputText.trim();
+        if (!normalizedInput) return;
+
+        const ulwCommand = parseUlwCommand(normalizedInput);
+        if (ulwCommand?.kind === "stop") {
+            clearUlwTurnCallback();
+            ulwRuntime.stop(threadId, "user_stop");
+            handleStop();
+            return;
+        }
+
+        if (ulwCommand?.kind === "config") {
+            if (
+                typeof ulwCommand.maxIterations !== "number" &&
+                !ulwCommand.completionPromise
+            ) {
+                sendError = "Usage: /u config max=30 promise=DONE";
+                return;
+            }
+            const configured = ulwRuntime.configure(threadId, {
+                maxIterations: ulwCommand.maxIterations,
+                completionPromise: ulwCommand.completionPromise,
+            });
+            sendError = null;
+            console.info(
+                `[ulw] defaults updated for ${threadId}: max=${configured.maxIterations}, promise=${configured.completionPromise}`,
+            );
+            return;
+        }
+
+        if (ulwCommand?.kind === "start") {
+            const task = ulwCommand.task ?? pickUlwTaskFromMessages(messages.getThreadMessages(threadId));
+            if (!task) {
+                sendError = "Add a task after /u, or send a normal task message first.";
+                return;
+            }
+
+            const state = ulwRuntime.start(threadId, {
+                task,
+                maxIterations: ulwCommand.maxIterations,
+                completionPromise: ulwCommand.completionPromise,
+            });
+
+            registerUlwTurnCallback(threadId);
+            const sent = sendTurnText(threadId, buildUlwKickoffPrompt(state));
+            if (!sent) {
+                clearUlwTurnCallback();
+                ulwRuntime.stop(threadId, "send_error");
+            }
+            return;
+        }
+
+        if (ulwRuntime.isActive(threadId)) {
+            clearUlwTurnCallback();
+            ulwRuntime.stop(threadId, "manual_user_input");
+        }
+
+        sendTurnText(threadId, normalizedInput);
+    }
+
+    $effect(() => {
+        return () => {
+            clearUlwTurnCallback();
+        };
+    });
 
     function handleStop() {
         if (!threadId) return;
+        if (ulwRuntime.isActive(threadId)) {
+            clearUlwTurnCallback();
+            ulwRuntime.stop(threadId, "user_interrupt");
+        }
         const result = messages.interrupt(threadId);
         if (!result.success) {
             sendError = result.error ?? "Failed to stop turn";

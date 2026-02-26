@@ -8,7 +8,7 @@
     "build": "bunx --bun vite build",
     "lint": "bunx eslint .",
     "typecheck": "bunx tsc -p tsconfig.json --noEmit && bunx tsc -p services/anchor/tsconfig.json --noEmit && bunx tsc -p services/orbit/tsconfig.json --noEmit",
-    "test": "python -m pytest -q services/control-plane/tests && bun --cwd services/orbit test",
+    "test": "bun test src/lib/**/*.test.ts && python -m pytest -q services/control-plane/tests && bun --cwd services/orbit test",
     "ci:local": "bun run lint && bun run typecheck && bun run test && bun run build",
     "preview": "bunx --bun vite preview --port 4173",
     "deploy": "bun run build && bunx wrangler pages deploy dist --project-name zane --branch main",

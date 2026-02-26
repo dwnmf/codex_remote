@@ -81,6 +81,21 @@
     reasoningOpen = false;
   }
 
+  function handleUlwShortcut() {
+    if (disabled) return;
+    const current = input.trim();
+    input = current ? `/u ${current}` : "/u ";
+  }
+
+  function handleUlwStopShortcut() {
+    if (disabled) {
+      onStop?.();
+      return;
+    }
+    onSubmit("/u stop");
+    input = "";
+  }
+
   function handleClickOutside(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (!target.closest(".dropdown")) {
@@ -96,13 +111,32 @@
     <textarea
       bind:value={input}
       onkeydown={handleKeydown}
-      placeholder="What would you like to do?"
+      placeholder="What would you like to do? (tip: /u <task>)"
       rows="1"
       {disabled}
     ></textarea>
 
     <div class="footer split">
       <div class="tools row">
+        <button
+          type="button"
+          class="tool-btn quick-action quick-action-primary row"
+          title="Start UltraWork loop"
+          onclick={handleUlwShortcut}
+          disabled={disabled}
+        >
+          ULW
+        </button>
+
+        <button
+          type="button"
+          class="tool-btn quick-action quick-action-stop row"
+          title="Stop ULW loop"
+          onclick={handleUlwStopShortcut}
+        >
+          Stop
+        </button>
+
         <!-- Model Selector -->
         <div class="dropdown" class:open={modelOpen}>
           <button
@@ -339,6 +373,25 @@
     width: 1rem;
     height: 1rem;
     flex-shrink: 0;
+  }
+
+  .quick-action {
+    font-weight: 800;
+  }
+
+  .quick-action-primary {
+    color: var(--cli-prefix-agent);
+    border-color: color-mix(in srgb, var(--cli-prefix-agent) 35%, var(--cli-border));
+  }
+
+  .quick-action-stop {
+    color: var(--cli-error);
+    border-color: color-mix(in srgb, var(--cli-error) 35%, var(--cli-border));
+  }
+
+  .quick-action:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .tool-btn .chevron {
