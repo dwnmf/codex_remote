@@ -10,15 +10,17 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
-import { SignJWT } from "jose";
+import { SignJWT, jwtVerify } from "jose";
 
 import type { AuthEnv } from "./env";
 import type { ChallengeRecord, DeviceCodeRecord, StoredCredential, StoredUser } from "./types";
 import { authCorsHeaders, base64UrlDecode, base64UrlEncode, getRpId, isAllowedOrigin } from "./utils";
 import { createSession, refreshSession, verifySession } from "./session";
 import {
+  consumeTotpStep,
   createUser,
   getCredential,
+  getTotpFactorByUserId,
   getUserById,
   getUserByName,
   hasAnyUsers,
@@ -26,9 +28,16 @@ import {
   randomUserId,
   revokeSession,
   updateCounter,
+  upsertTotpFactor,
   upsertCredential,
 } from "./db";
 import { CHALLENGE_TTL_MS, consumeChallenge, setChallenge } from "./challenge";
+import {
+  buildTotpUri,
+  createTotpSetupTokenPayload,
+  generateTotpSecret,
+  verifyTotpCode,
+} from "./totp";
 
 interface ChallengeStoreSetRequest {
   key: string;
@@ -56,7 +65,45 @@ interface LoginVerifyRequest {
   credential: AuthenticationResponseJSON;
 }
 
+interface TotpRegisterStartRequest {
+  name?: string;
+  displayName?: string;
+}
+
+interface TotpRegisterVerifyRequest {
+  setupToken?: string;
+  code?: string;
+}
+
+interface TotpLoginRequest {
+  username?: string;
+  code?: string;
+}
+
+interface TotpSetupStartRequest {
+  username?: string;
+}
+
+interface TotpSetupVerifyRequest {
+  setupToken?: string;
+  code?: string;
+}
+
+interface TotpSetupPayload {
+  name: string;
+  displayName: string;
+  secretBase32: string;
+  digits: number;
+  periodSec: number;
+  nonce: string;
+  userId?: string;
+}
+
 const ANCHOR_ACCESS_TOKEN_TTL_SEC = 60 * 60;
+const TOTP_SETUP_TOKEN_TTL_SEC = 10 * 60;
+const TOTP_DIGITS = 6;
+const TOTP_PERIOD_SEC = 30;
+const TOTP_ISSUER = "Zane";
 
 function extractChallengeFromClientData(clientDataJSON: unknown): string | null {
   if (typeof clientDataJSON !== "string" || !clientDataJSON) return null;
@@ -65,6 +112,65 @@ function extractChallengeFromClientData(clientDataJSON: unknown): string | null 
     const clientData = JSON.parse(decoded) as { challenge?: unknown };
     if (typeof clientData.challenge !== "string" || !clientData.challenge) return null;
     return clientData.challenge;
+  } catch {
+    return null;
+  }
+}
+
+function parseTotpCode(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw.replace(/\s|-/g, "").trim();
+}
+
+function getWebJwtSecret(env: AuthEnv): string | null {
+  const secret = env.ZANE_WEB_JWT_SECRET?.trim();
+  return secret || null;
+}
+
+async function createTotpSetupToken(env: AuthEnv, payload: TotpSetupPayload): Promise<string | null> {
+  const secret = getWebJwtSecret(env);
+  if (!secret) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  return await new SignJWT(payload as unknown as Record<string, unknown>)
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuer("zane-auth")
+    .setAudience("zane-totp-setup")
+    .setIssuedAt(now)
+    .setExpirationTime(now + TOTP_SETUP_TOKEN_TTL_SEC)
+    .sign(new TextEncoder().encode(secret));
+}
+
+async function verifyTotpSetupToken(env: AuthEnv, token: string): Promise<TotpSetupPayload | null> {
+  const secret = getWebJwtSecret(env);
+  if (!secret) return null;
+  try {
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret), {
+      issuer: "zane-auth",
+      audience: "zane-totp-setup",
+    });
+    if (
+      typeof payload.name !== "string" ||
+      typeof payload.displayName !== "string" ||
+      typeof payload.secretBase32 !== "string" ||
+      typeof payload.digits !== "number" ||
+      typeof payload.periodSec !== "number" ||
+      typeof payload.nonce !== "string"
+    ) {
+      return null;
+    }
+    if (payload.userId !== undefined && typeof payload.userId !== "string") {
+      return null;
+    }
+    return {
+      name: payload.name,
+      displayName: payload.displayName,
+      secretBase32: payload.secretBase32,
+      digits: payload.digits,
+      periodSec: payload.periodSec,
+      nonce: payload.nonce,
+      userId: typeof payload.userId === "string" ? payload.userId : undefined,
+    };
   } catch {
     return null;
   }
@@ -183,6 +289,7 @@ async function handleSession(req: Request, env: AuthEnv): Promise<Response> {
 
   let user = null;
   let hasPasskey = false;
+  let hasTotp = false;
 
   if (session) {
     const storedUser = await getUserById(env, session.sub);
@@ -190,6 +297,7 @@ async function handleSession(req: Request, env: AuthEnv): Promise<Response> {
       user = { id: storedUser.id, name: storedUser.name };
       const credentials = await listCredentials(env, storedUser.id);
       hasPasskey = credentials.length > 0;
+      hasTotp = Boolean(await getTotpFactorByUserId(env, storedUser.id));
     }
   }
 
@@ -198,6 +306,7 @@ async function handleSession(req: Request, env: AuthEnv): Promise<Response> {
       authenticated: Boolean(session && user),
       user,
       hasPasskey,
+      hasTotp,
       systemHasUsers,
     },
     { status: 200, headers: authCorsHeaders(req, env) }
@@ -298,6 +407,9 @@ async function handleRegisterVerify(req: Request, env: AuthEnv): Promise<Respons
   const challengeRecord = await consumeChallenge(env, challenge);
   if (!challengeRecord) {
     return Response.json({ error: "Registration challenge expired." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+  if (challengeRecord.type !== "registration") {
+    return Response.json({ error: "Invalid registration challenge." }, { status: 400, headers: authCorsHeaders(req, env) });
   }
 
   const rpID = getRpId(origin!);
@@ -448,6 +560,12 @@ async function handleLoginVerify(req: Request, env: AuthEnv): Promise<Response> 
       { status: 400, headers: authCorsHeaders(req, env) }
     );
   }
+  if (challengeRecord.type !== "authentication") {
+    return Response.json({ error: "Invalid authentication challenge." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+  if (challengeRecord.userId && challengeRecord.userId !== user.id) {
+    return Response.json({ error: "Challenge/user mismatch." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
 
   const rpID = getRpId(origin!);
 
@@ -489,6 +607,265 @@ async function handleLoginVerify(req: Request, env: AuthEnv): Promise<Response> 
     },
     { status: 200, headers: authCorsHeaders(req, env) }
   );
+}
+
+async function handleTotpRegisterStart(req: Request, env: AuthEnv): Promise<Response> {
+  const origin = req.headers.get("origin");
+  if (!isAllowedOrigin(origin, env)) {
+    return Response.json({ error: "Origin not allowed." }, { status: 403, headers: authCorsHeaders(req, env) });
+  }
+
+  const body = (await req.json()) as TotpRegisterStartRequest;
+  const name = body.name?.trim();
+  const displayName = body.displayName?.trim() || name;
+  if (!name) {
+    return Response.json({ error: "Name is required." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const existing = await getUserByName(env, name);
+  if (existing) {
+    return Response.json({ error: "Registration failed." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const secretBase32 = generateTotpSecret();
+  const payload: TotpSetupPayload = createTotpSetupTokenPayload({
+    name,
+    displayName: displayName || name,
+    secretBase32,
+    digits: TOTP_DIGITS,
+    periodSec: TOTP_PERIOD_SEC,
+  });
+  const setupToken = await createTotpSetupToken(env, payload);
+  if (!setupToken) {
+    return Response.json({ error: "Auth secret not configured." }, { status: 503, headers: authCorsHeaders(req, env) });
+  }
+
+  const otpauthUrl = buildTotpUri({
+    secretBase32,
+    accountName: name,
+    issuer: TOTP_ISSUER,
+    digits: TOTP_DIGITS,
+    periodSec: TOTP_PERIOD_SEC,
+  });
+  return Response.json(
+    {
+      setupToken,
+      secret: secretBase32,
+      otpauthUrl,
+      issuer: TOTP_ISSUER,
+      digits: TOTP_DIGITS,
+      period: TOTP_PERIOD_SEC,
+    },
+    { status: 200, headers: authCorsHeaders(req, env) }
+  );
+}
+
+async function handleTotpRegisterVerify(req: Request, env: AuthEnv): Promise<Response> {
+  const origin = req.headers.get("origin");
+  if (!isAllowedOrigin(origin, env)) {
+    return Response.json({ error: "Origin not allowed." }, { status: 403, headers: authCorsHeaders(req, env) });
+  }
+
+  const body = (await req.json()) as TotpRegisterVerifyRequest;
+  const setupToken = body.setupToken?.trim();
+  const code = parseTotpCode(body.code);
+  if (!setupToken || !code) {
+    return Response.json({ error: "setupToken and code are required." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const payload = await verifyTotpSetupToken(env, setupToken);
+  if (!payload) {
+    return Response.json({ error: "Setup token expired." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const existing = await getUserByName(env, payload.name);
+  if (existing) {
+    return Response.json({ error: "Registration failed." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const verification = await verifyTotpCode(payload.secretBase32, code, {
+    digits: payload.digits,
+    periodSec: payload.periodSec,
+    window: 1,
+  });
+  if (!verification.valid || verification.step === null) {
+    return Response.json({ error: "Invalid code." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  let user: StoredUser;
+  try {
+    user = await createUser(env, payload.name, payload.displayName);
+  } catch {
+    return Response.json({ error: "Registration failed." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  await upsertTotpFactor(env, {
+    userId: user.id,
+    secretBase32: payload.secretBase32,
+    digits: payload.digits,
+    periodSec: payload.periodSec,
+    algorithm: "SHA1",
+    lastUsedStep: verification.step,
+  });
+
+  const session = await createSession(env, user);
+  return Response.json(
+    {
+      verified: true,
+      token: session.token,
+      refreshToken: session.refreshToken,
+      user: { id: user.id, name: user.name },
+    },
+    { status: 200, headers: authCorsHeaders(req, env) }
+  );
+}
+
+async function handleTotpLogin(req: Request, env: AuthEnv): Promise<Response> {
+  const origin = req.headers.get("origin");
+  if (!isAllowedOrigin(origin, env)) {
+    return Response.json({ error: "Origin not allowed." }, { status: 403, headers: authCorsHeaders(req, env) });
+  }
+
+  const body = (await req.json()) as TotpLoginRequest;
+  const username = body.username?.trim();
+  const code = parseTotpCode(body.code);
+  if (!username || !code) {
+    return Response.json({ error: "Invalid credentials." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const user = await getUserByName(env, username);
+  if (!user) {
+    return Response.json({ error: "Invalid credentials." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const factor = await getTotpFactorByUserId(env, user.id);
+  if (!factor) {
+    return Response.json({ error: "Invalid credentials." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const verification = await verifyTotpCode(factor.secretBase32, code, {
+    digits: factor.digits,
+    periodSec: factor.periodSec,
+    window: 1,
+  });
+  if (!verification.valid || verification.step === null) {
+    return Response.json({ error: "Invalid credentials." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const consumed = await consumeTotpStep(env, user.id, verification.step);
+  if (!consumed) {
+    return Response.json({ error: "Invalid credentials." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const session = await createSession(env, user);
+  return Response.json(
+    {
+      verified: true,
+      token: session.token,
+      refreshToken: session.refreshToken,
+      user: { id: user.id, name: user.name },
+    },
+    { status: 200, headers: authCorsHeaders(req, env) }
+  );
+}
+
+async function handleTotpSetupStart(req: Request, env: AuthEnv): Promise<Response> {
+  const session = await verifySession(req, env);
+  if (!session) {
+    return Response.json({ error: "Authentication required." }, { status: 401, headers: authCorsHeaders(req, env) });
+  }
+
+  const origin = req.headers.get("origin");
+  if (!isAllowedOrigin(origin, env)) {
+    return Response.json({ error: "Origin not allowed." }, { status: 403, headers: authCorsHeaders(req, env) });
+  }
+
+  const user = await getUserById(env, session.sub);
+  if (!user) {
+    return Response.json({ error: "User not found." }, { status: 404, headers: authCorsHeaders(req, env) });
+  }
+
+  const body = (await req.json()) as TotpSetupStartRequest;
+  const username = body.username?.trim() || user.name;
+  const secretBase32 = generateTotpSecret();
+  const payload: TotpSetupPayload = createTotpSetupTokenPayload({
+    name: username,
+    displayName: user.displayName,
+    secretBase32,
+    digits: TOTP_DIGITS,
+    periodSec: TOTP_PERIOD_SEC,
+    userId: user.id,
+  });
+  const setupToken = await createTotpSetupToken(env, payload);
+  if (!setupToken) {
+    return Response.json({ error: "Auth secret not configured." }, { status: 503, headers: authCorsHeaders(req, env) });
+  }
+
+  const otpauthUrl = buildTotpUri({
+    secretBase32,
+    accountName: username,
+    issuer: TOTP_ISSUER,
+    digits: TOTP_DIGITS,
+    periodSec: TOTP_PERIOD_SEC,
+  });
+  return Response.json(
+    {
+      setupToken,
+      secret: secretBase32,
+      otpauthUrl,
+      issuer: TOTP_ISSUER,
+      digits: TOTP_DIGITS,
+      period: TOTP_PERIOD_SEC,
+    },
+    { status: 200, headers: authCorsHeaders(req, env) }
+  );
+}
+
+async function handleTotpSetupVerify(req: Request, env: AuthEnv): Promise<Response> {
+  const session = await verifySession(req, env);
+  if (!session) {
+    return Response.json({ error: "Authentication required." }, { status: 401, headers: authCorsHeaders(req, env) });
+  }
+
+  const origin = req.headers.get("origin");
+  if (!isAllowedOrigin(origin, env)) {
+    return Response.json({ error: "Origin not allowed." }, { status: 403, headers: authCorsHeaders(req, env) });
+  }
+
+  const body = (await req.json()) as TotpSetupVerifyRequest;
+  const setupToken = body.setupToken?.trim();
+  const code = parseTotpCode(body.code);
+  if (!setupToken || !code) {
+    return Response.json({ error: "setupToken and code are required." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const payload = await verifyTotpSetupToken(env, setupToken);
+  if (!payload) {
+    return Response.json({ error: "Setup token expired." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+  if (!payload.userId || payload.userId !== session.sub) {
+    return Response.json({ error: "Setup token user mismatch." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const verification = await verifyTotpCode(payload.secretBase32, code, {
+    digits: payload.digits,
+    periodSec: payload.periodSec,
+    window: 1,
+  });
+  if (!verification.valid || verification.step === null) {
+    return Response.json({ error: "Invalid code." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  await upsertTotpFactor(env, {
+    userId: session.sub,
+    secretBase32: payload.secretBase32,
+    digits: payload.digits,
+    periodSec: payload.periodSec,
+    algorithm: "SHA1",
+    lastUsedStep: verification.step,
+  });
+
+  return Response.json({ verified: true, hasTotp: true }, { status: 200, headers: authCorsHeaders(req, env) });
 }
 
 const DEVICE_CODE_TTL_MS = 10 * 60 * 1000;
@@ -714,6 +1091,26 @@ export async function handleAuthRequest(req: Request, env: AuthEnv): Promise<Res
 
   if (url.pathname === "/auth/login/verify" && req.method === "POST") {
     return await handleLoginVerify(req, env);
+  }
+
+  if (url.pathname === "/auth/login/totp" && req.method === "POST") {
+    return await handleTotpLogin(req, env);
+  }
+
+  if (url.pathname === "/auth/register/totp/start" && req.method === "POST") {
+    return await handleTotpRegisterStart(req, env);
+  }
+
+  if (url.pathname === "/auth/register/totp/verify" && req.method === "POST") {
+    return await handleTotpRegisterVerify(req, env);
+  }
+
+  if (url.pathname === "/auth/totp/setup/options" && req.method === "POST") {
+    return await handleTotpSetupStart(req, env);
+  }
+
+  if (url.pathname === "/auth/totp/setup/verify" && req.method === "POST") {
+    return await handleTotpSetupVerify(req, env);
   }
 
   if (url.pathname === "/auth/refresh" && req.method === "POST") {

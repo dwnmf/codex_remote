@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "bunx wrangler dev",
     "deploy": "bunx wrangler deploy",
-    "types": "bunx wrangler types"
+    "types": "bunx wrangler types",
+    "test": "bun test src/auth/**/*.test.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250909.0",

@@ -4,12 +4,24 @@
   import AuthPageLayout from "../lib/components/AuthPageLayout.svelte";
 
   const authMode = (import.meta.env.AUTH_MODE ?? "passkey").toLowerCase();
+  const allowTotp = authMode !== "basic";
   let username = $state("");
+  let totpCode = $state("");
+  let method = $state<"passkey" | "totp">("passkey");
   const isSignedIn = $derived(auth.status === "signed_in");
 
   $effect(() => {
     if (isSignedIn) navigate("/app");
   });
+
+  async function handleSignIn() {
+    if (!username.trim()) return;
+    if (method === "totp") {
+      await auth.signIn(username.trim(), "totp", totpCode);
+      return;
+    }
+    await auth.signIn(username.trim(), "passkey");
+  }
 </script>
 
 <svelte:head>
@@ -19,7 +31,39 @@
 <AuthPageLayout>
   <span class="eyebrow">Sign in</span>
   <h1>Sign in</h1>
-  <p class="subtitle">{authMode === "basic" ? "Sign in with your username." : "Use your passkey to access Zane."}</p>
+  <p class="subtitle">
+    {#if authMode === "basic"}
+      Sign in with your username.
+    {:else if method === "totp"}
+      Sign in with your username and one-time code.
+    {:else}
+      Use your passkey to access Zane.
+    {/if}
+  </p>
+
+  {#if allowTotp}
+    <div class="method-toggle">
+      <button
+        type="button"
+        class:active={method === "passkey"}
+        onclick={() => {
+          method = "passkey";
+          totpCode = "";
+        }}
+      >
+        Passkey
+      </button>
+      <button
+        type="button"
+        class:active={method === "totp"}
+        onclick={() => {
+          method = "totp";
+        }}
+      >
+        TOTP
+      </button>
+    </div>
+  {/if}
 
   {#if auth.error}
     <div class="auth-error">{auth.error}</div>
@@ -31,16 +75,35 @@
     placeholder="Username"
     bind:value={username}
     onkeydown={(e) => {
-      if (e.key === "Enter" && username.trim()) auth.signIn(username.trim());
+      if (e.key === "Enter" && username.trim()) void handleSignIn();
     }}
   />
+  {#if method === "totp" && authMode !== "basic"}
+    <input
+      type="text"
+      class="auth-input"
+      placeholder="123456"
+      bind:value={totpCode}
+      onkeydown={(e) => {
+        if (e.key === "Enter" && username.trim() && totpCode.trim()) void handleSignIn();
+      }}
+    />
+  {/if}
   <button
     class="primary-btn"
     type="button"
-    onclick={() => auth.signIn(username.trim())}
-    disabled={auth.busy || !username.trim()}
+    onclick={handleSignIn}
+    disabled={auth.busy || !username.trim() || (method === "totp" && !totpCode.trim())}
   >
-    {auth.busy ? "Working..." : authMode === "basic" ? "Sign in" : "Sign in with passkey"}
+    {#if auth.busy}
+      Working...
+    {:else if authMode === "basic"}
+      Sign in
+    {:else if method === "totp"}
+      Sign in with TOTP
+    {:else}
+      Sign in with passkey
+    {/if}
   </button>
   <a class="link-btn" href="/register">Create new account</a>
 </AuthPageLayout>
@@ -67,6 +130,29 @@
     font-size: var(--text-base);
     line-height: 1.5;
     max-width: 32ch;
+  }
+
+  .method-toggle {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .method-toggle button {
+    border: 1px solid var(--cli-border);
+    background: transparent;
+    color: var(--cli-text-dim);
+    border-radius: var(--radius-md);
+    padding: 0.45rem 0.65rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .method-toggle button.active {
+    color: var(--cli-bg);
+    background: var(--cli-text);
+    border-color: var(--cli-text);
   }
 
   .auth-input {

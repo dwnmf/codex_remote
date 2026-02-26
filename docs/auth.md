@@ -1,6 +1,6 @@
 # Auth Overview
 
-This app uses passkeys for user authentication and JWTs for service-to-service auth.
+This app uses passkeys and TOTP for user authentication, plus JWTs for service-to-service auth.
 
 ## Components
 
@@ -30,6 +30,18 @@ User JWTs are also stored server-side in `auth_sessions` for revocation and expi
 3) Client stores both tokens in `localStorage`.
 4) Orbit stores the session id (`jti`) in D1.
 5) When the JWT expires, the client calls `POST /auth/refresh` with the refresh token to get a new JWT and rotated refresh token.
+
+### TOTP login and registration
+
+1) Web client can register with TOTP:
+   - `POST /auth/register/totp/start`
+   - `POST /auth/register/totp/verify`
+2) Web client can sign in with TOTP:
+   - `POST /auth/login/totp`
+3) Optional setup for already signed-in users:
+   - `POST /auth/totp/setup/options`
+   - `POST /auth/totp/setup/verify`
+4) TOTP factors are stored in D1 (`totp_factors`) with replay protection (`last_used_step`).
 
 ### Device code login (Anchor CLI)
 

@@ -28,6 +28,7 @@ function isLocalMode(): boolean {
 }
 
 type AuthStatus = "loading" | "signed_out" | "signed_in" | "needs_setup";
+export type AuthMethod = "passkey" | "totp";
 
 interface AuthUser {
   id: string;
@@ -38,6 +39,7 @@ interface AuthSessionResponse {
   authenticated: boolean;
   user: AuthUser | null;
   hasPasskey: boolean;
+  hasTotp?: boolean;
   systemHasUsers: boolean;
 }
 
@@ -68,6 +70,26 @@ interface BasicAuthResponse {
   refreshToken?: string;
   user?: AuthUser;
   error?: string;
+}
+
+interface TotpSetupResponse {
+  setupToken?: string;
+  secret?: string;
+  otpauthUrl?: string;
+  issuer?: string;
+  digits?: number;
+  period?: number;
+  error?: string;
+}
+
+interface TotpSetupState {
+  setupToken: string;
+  secret: string;
+  otpauthUrl: string;
+  issuer: string;
+  digits: number;
+  period: number;
+  username: string;
 }
 
 function apiUrl(path: string): string {
@@ -104,6 +126,8 @@ function decodeJwtPayload(token: string): { exp?: number } | null {
 class AuthStore {
   status = $state<AuthStatus>("loading");
   hasPasskey = $state(false);
+  hasTotp = $state(false);
+  totpSetup = $state<TotpSetupState | null>(null);
   token = $state<string | null>(null);
   user = $state<AuthUser | null>(null);
   busy = $state(false);
@@ -120,6 +144,7 @@ class AuthStore {
   async initialize() {
     this.status = "loading";
     this.error = null;
+    this.totpSetup = null;
 
     // Local mode: skip all auth for trusted networks (e.g., Tailscale)
     if (isLocalMode()) {
@@ -143,6 +168,7 @@ class AuthStore {
       }
 
       this.hasPasskey = data.hasPasskey;
+      this.hasTotp = Boolean(data.hasTotp);
 
       if (data.authenticated && data.user) {
         this.user = data.user;
@@ -161,6 +187,7 @@ class AuthStore {
           const retryData = await parseResponse<AuthSessionResponse>(retryResponse);
           if (retryResponse.ok && retryData?.authenticated && retryData.user) {
             this.hasPasskey = retryData.hasPasskey;
+            this.hasTotp = Boolean(retryData.hasTotp);
             this.user = retryData.user;
             this.status = "signed_in";
             this.#scheduleRefresh();
@@ -182,7 +209,7 @@ class AuthStore {
     }
   }
 
-  async signIn(username: string): Promise<void> {
+  async signIn(username: string, method: AuthMethod = "passkey", totpCode = ""): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     this.error = null;
@@ -202,6 +229,22 @@ class AuthStore {
 
         this.#applySession({ verified: true, token: data.token, refreshToken: data.refreshToken, user: data.user });
         this.hasPasskey = false;
+        return;
+      }
+
+      if (method === "totp") {
+        const response = await fetch(apiUrl("/auth/login/totp"), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, code: totpCode }),
+        });
+        const data = await parseResponse<BasicAuthResponse>(response);
+        if (!response.ok || !data?.token) {
+          this.error = data?.error ?? "Sign-in failed.";
+          return;
+        }
+        this.#applySession({ verified: true, token: data.token, refreshToken: data.refreshToken, user: data.user });
+        this.hasTotp = true;
         return;
       }
 
@@ -292,6 +335,78 @@ class AuthStore {
     }
   }
 
+  async startTotpRegistration(name: string, displayName?: string): Promise<boolean> {
+    if (this.busy) return false;
+    this.busy = true;
+    this.error = null;
+
+    try {
+      const response = await fetch(apiUrl("/auth/register/totp/start"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, displayName: displayName || name }),
+      });
+      const data = await parseResponse<TotpSetupResponse>(response);
+      if (!response.ok || !data?.setupToken || !data.secret || !data.otpauthUrl) {
+        this.error = data?.error ?? "Unable to start TOTP setup.";
+        this.totpSetup = null;
+        return false;
+      }
+
+      this.totpSetup = {
+        setupToken: data.setupToken,
+        secret: data.secret,
+        otpauthUrl: data.otpauthUrl,
+        issuer: data.issuer ?? "Zane",
+        digits: data.digits ?? 6,
+        period: data.period ?? 30,
+        username: name,
+      };
+      return true;
+    } catch (err) {
+      this.error = err instanceof Error ? err.message : "Unable to start TOTP setup.";
+      this.totpSetup = null;
+      return false;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async completeTotpRegistration(code: string): Promise<void> {
+    if (this.busy) return;
+    if (!this.totpSetup) {
+      this.error = "TOTP setup is missing.";
+      return;
+    }
+
+    this.busy = true;
+    this.error = null;
+    try {
+      const response = await fetch(apiUrl("/auth/register/totp/verify"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ setupToken: this.totpSetup.setupToken, code }),
+      });
+      const data = await parseResponse<BasicAuthResponse>(response);
+      if (!response.ok || !data?.token) {
+        this.error = data?.error ?? "Registration failed.";
+        return;
+      }
+
+      this.#applySession({ verified: true, token: data.token, refreshToken: data.refreshToken, user: data.user });
+      this.hasTotp = true;
+      this.totpSetup = null;
+    } catch (err) {
+      this.error = err instanceof Error ? err.message : "Registration failed.";
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  cancelTotpRegistration(): void {
+    this.totpSetup = null;
+  }
+
   async signOut(): Promise<void> {
     try {
       if (this.token) {
@@ -305,6 +420,9 @@ class AuthStore {
     }
     this.token = null;
     this.user = null;
+    this.hasPasskey = false;
+    this.hasTotp = false;
+    this.totpSetup = null;
     this.status = "signed_out";
     this.error = null;
     this.#clearToken();
@@ -318,6 +436,7 @@ class AuthStore {
     this.status = "signed_in";
     this.user = { id: "local", name: "local" };
     this.token = "local-mode";
+    this.totpSetup = null;
   }
 
   /** Disable local mode and return to normal auth flow */
@@ -347,6 +466,7 @@ class AuthStore {
       }
     }
     this.#scheduleRefresh();
+    void this.#syncSessionFlags();
   }
 
   #authHeaders(): HeadersInit {
@@ -438,9 +558,25 @@ class AuthStore {
         localStorage.setItem(REFRESH_STORAGE_KEY, data.refreshToken);
       }
       this.#scheduleRefresh();
+      void this.#syncSessionFlags();
       return true;
     } catch {
       return false;
+    }
+  }
+
+  async #syncSessionFlags(): Promise<void> {
+    try {
+      const response = await fetch(apiUrl("/auth/session"), {
+        method: "GET",
+        headers: this.#authHeaders(),
+      });
+      const data = await parseResponse<AuthSessionResponse>(response);
+      if (!response.ok || !data) return;
+      this.hasPasskey = data.hasPasskey;
+      this.hasTotp = Boolean(data.hasTotp);
+    } catch {
+      // ignore best-effort update
     }
   }
 }

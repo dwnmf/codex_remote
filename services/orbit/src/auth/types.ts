@@ -16,6 +16,15 @@ export interface StoredCredential {
   backedUp: boolean;
 }
 
+export interface StoredTotpFactor {
+  userId: string;
+  secretBase32: string;
+  digits: number;
+  periodSec: number;
+  algorithm: "SHA1";
+  lastUsedStep: number | null;
+}
+
 export interface SessionPayload {
   sub: string;
   name: string;

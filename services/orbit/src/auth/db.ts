@@ -1,5 +1,5 @@
 import type { AuthEnv } from "./env";
-import type { StoredCredential, StoredUser } from "./types";
+import type { StoredCredential, StoredTotpFactor, StoredUser } from "./types";
 import { base64UrlEncode } from "./utils";
 
 interface PasskeyUserRow {
@@ -30,6 +30,15 @@ interface AuthSessionRow {
   revoked_at: number | null;
   refresh_token: string | null;
   refresh_expires_at: number | null;
+}
+
+interface TotpFactorRow {
+  user_id: string;
+  secret_base32: string;
+  digits: number;
+  period_sec: number;
+  algorithm: string;
+  last_used_step: number | null;
 }
 
 export function randomUserId(): string {
@@ -145,6 +154,51 @@ export async function updateCounter(env: AuthEnv, id: string, counter: number): 
   await env.DB.prepare("UPDATE passkey_credentials SET counter = ?, updated_at = ? WHERE id = ?")
     .bind(counter, Date.now(), id)
     .run();
+}
+
+export async function getTotpFactorByUserId(env: AuthEnv, userId: string): Promise<StoredTotpFactor | null> {
+  const row = await env.DB.prepare(
+    "SELECT user_id, secret_base32, digits, period_sec, algorithm, last_used_step FROM totp_factors WHERE user_id = ?"
+  )
+    .bind(userId)
+    .first<TotpFactorRow>();
+
+  if (!row) return null;
+  const algorithm = row.algorithm.toUpperCase() === "SHA1" ? "SHA1" : "SHA1";
+  return {
+    userId: row.user_id,
+    secretBase32: row.secret_base32,
+    digits: row.digits,
+    periodSec: row.period_sec,
+    algorithm,
+    lastUsedStep: row.last_used_step ?? null,
+  };
+}
+
+export async function upsertTotpFactor(env: AuthEnv, factor: StoredTotpFactor): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO totp_factors (user_id, secret_base32, digits, period_sec, algorithm, last_used_step, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET secret_base32 = excluded.secret_base32, digits = excluded.digits, period_sec = excluded.period_sec, algorithm = excluded.algorithm, last_used_step = excluded.last_used_step, updated_at = excluded.updated_at"
+  )
+    .bind(
+      factor.userId,
+      factor.secretBase32,
+      factor.digits,
+      factor.periodSec,
+      factor.algorithm,
+      factor.lastUsedStep,
+      Date.now(),
+      Date.now()
+    )
+    .run();
+}
+
+export async function consumeTotpStep(env: AuthEnv, userId: string, step: number): Promise<boolean> {
+  const row = await env.DB.prepare(
+    "UPDATE totp_factors SET last_used_step = ?, updated_at = ? WHERE user_id = ? AND (last_used_step IS NULL OR last_used_step < ?) RETURNING user_id"
+  )
+    .bind(step, Date.now(), userId, step)
+    .first<{ user_id: string }>();
+  return Boolean(row?.user_id);
 }
 
 /**
