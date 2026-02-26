@@ -142,6 +142,20 @@ def test_basic_auth_session_refresh_logout(tmp_path: Path, monkeypatch) -> None:
         assert after_logout.json()["authenticated"] is False
 
 
+def test_basic_login_is_case_insensitive(tmp_path: Path, monkeypatch) -> None:
+    client = _make_client(tmp_path, monkeypatch, auth_mode="basic")
+    with client:
+        username = f"user-{uuid.uuid4().hex[:8]}"
+        _register_basic(client, username)
+
+        mixed_case = username.swapcase()
+        login = client.post("/auth/login/basic", json={"username": mixed_case})
+        assert login.status_code == 200, login.text
+        payload = login.json()
+        assert payload.get("token")
+        assert payload.get("user", {}).get("name") == username
+
+
 def test_device_flow_anchor_token_refresh_and_ws_preflight(tmp_path: Path, monkeypatch) -> None:
     client = _make_client(tmp_path, monkeypatch, auth_mode="basic")
     with client:

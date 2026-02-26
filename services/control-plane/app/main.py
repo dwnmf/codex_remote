@@ -109,6 +109,17 @@ def _verify_web_session_token(token: str) -> dict[str, Any] | None:
     return payload
 
 
+def _normalize_username(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _find_user_by_name(username: str):
+    user = db.get_user_by_name(username)
+    if user:
+        return user
+    return db.get_user_by_name_case_insensitive(username)
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {
@@ -140,12 +151,12 @@ async def auth_register_basic(payload: dict[str, Any]) -> JSONResponse:
     if not _is_basic_mode():
         return JSONResponse({"error": "Basic auth mode is disabled."}, status_code=400)
 
-    name = str(payload.get("name", "")).strip()
+    name = _normalize_username(payload.get("name", ""))
     display_name = str(payload.get("displayName", "")).strip() or name
     if not name:
         return JSONResponse({"error": "Name is required."}, status_code=400)
 
-    if db.get_user_by_name(name):
+    if _find_user_by_name(name):
         return JSONResponse({"error": "User already exists."}, status_code=400)
 
     try:
@@ -160,11 +171,11 @@ async def auth_login_basic(payload: dict[str, Any]) -> JSONResponse:
     if not _is_basic_mode():
         return JSONResponse({"error": "Basic auth mode is disabled."}, status_code=400)
 
-    username = str(payload.get("username", "")).strip()
+    username = _normalize_username(payload.get("username", ""))
     if not username:
         return JSONResponse({"error": "Username is required."}, status_code=400)
 
-    user = db.get_user_by_name(username)
+    user = _find_user_by_name(username)
     if not user:
         return JSONResponse({"error": "Invalid credentials."}, status_code=400)
 
@@ -204,11 +215,11 @@ async def auth_register_options(request: Request, payload: dict[str, Any]) -> JS
         )
         return JSONResponse(options, status_code=200)
 
-    name = str(payload.get("name", "")).strip()
+    name = _normalize_username(payload.get("name", ""))
     display_name = str(payload.get("displayName", "")).strip() or name
     if not name:
         return JSONResponse({"error": "Name is required."}, status_code=400)
-    if db.get_user_by_name(name):
+    if _find_user_by_name(name):
         return JSONResponse({"error": "Registration failed."}, status_code=400)
 
     pseudo_user_id = f"pending-{secrets.token_hex(8)}"
@@ -266,7 +277,7 @@ async def auth_register_verify(request: Request, payload: dict[str, Any]) -> JSO
         pending_display = (challenge_record.pending_display_name or pending_name).strip() or pending_name
         if not pending_name:
             return JSONResponse({"error": "Invalid challenge record."}, status_code=400)
-        if db.get_user_by_name(pending_name):
+        if _find_user_by_name(pending_name):
             return JSONResponse({"error": "Registration failed."}, status_code=400)
         try:
             user = db.create_user(name=pending_name, display_name=pending_display)
@@ -293,11 +304,11 @@ async def auth_login_options(request: Request, payload: dict[str, Any]) -> JSONR
         return JSONResponse({"error": "Passkey flow is disabled. Use AUTH_MODE=basic."}, status_code=400)
 
     origin = _require_passkey_origin(request)
-    username = str(payload.get("username", "")).strip()
+    username = _normalize_username(payload.get("username", ""))
     if not username:
         return JSONResponse({"error": "Username is required."}, status_code=400)
 
-    user = db.get_user_by_name(username)
+    user = _find_user_by_name(username)
     if not user:
         return JSONResponse({"error": "Invalid credentials."}, status_code=400)
 

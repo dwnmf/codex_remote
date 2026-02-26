@@ -83,6 +83,10 @@
     type="text"
     class="auth-input"
     placeholder="Username"
+    autocomplete="username"
+    autocapitalize="none"
+    autocorrect="off"
+    spellcheck="false"
     disabled={auth.busy || (method === "totp" && Boolean(auth.totpSetup))}
     bind:value={newUsername}
     onkeydown={(e) => {
@@ -99,6 +103,12 @@
         type="text"
         class="auth-input"
         placeholder="123456"
+        autocomplete="one-time-code"
+        autocapitalize="none"
+        autocorrect="off"
+        spellcheck="false"
+        inputmode="numeric"
+        pattern="[0-9]*"
         bind:value={totpCode}
         onkeydown={(e) => {
           if (e.key === "Enter" && totpCode.trim()) handleRegister();

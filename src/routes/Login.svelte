@@ -73,6 +73,10 @@
     type="text"
     class="auth-input"
     placeholder="Username"
+    autocomplete="username"
+    autocapitalize="none"
+    autocorrect="off"
+    spellcheck="false"
     bind:value={username}
     onkeydown={(e) => {
       if (e.key === "Enter" && username.trim()) void handleSignIn();
@@ -83,6 +87,12 @@
       type="text"
       class="auth-input"
       placeholder="123456"
+      autocomplete="one-time-code"
+      autocapitalize="none"
+      autocorrect="off"
+      spellcheck="false"
+      inputmode="numeric"
+      pattern="[0-9]*"
       bind:value={totpCode}
       onkeydown={(e) => {
         if (e.key === "Enter" && username.trim() && totpCode.trim()) void handleSignIn();

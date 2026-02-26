@@ -202,6 +202,15 @@ class Database:
             return None
         return User(id=row["id"], name=row["name"], display_name=row["display_name"])
 
+    def get_user_by_name_case_insensitive(self, name: str) -> User | None:
+        row = self._conn.execute(
+            "SELECT id, name, display_name FROM users WHERE lower(name) = lower(?) LIMIT 1",
+            (name,),
+        ).fetchone()
+        if not row:
+            return None
+        return User(id=row["id"], name=row["name"], display_name=row["display_name"])
+
     def create_user(self, name: str, display_name: str | None = None) -> User:
         user_id = uuid.uuid4().hex
         now = _now_sec()
