@@ -9,11 +9,9 @@
     import { auth } from "../lib/auth.svelte";
     import { theme } from "../lib/theme.svelte";
     import {
-        buildUlwContinuationPrompt,
-        buildUlwKickoffPrompt,
-        hasCompletionPromise,
         parseUlwCommand,
         pickUlwTaskFromMessages,
+        ulwLoopRunner,
         ulwRuntime,
     } from "../lib/ulw";
     import AppHeader from "../lib/components/AppHeader.svelte";
@@ -90,13 +88,6 @@
     });
 
     let sendError = $state<string | null>(null);
-    let ulwTurnCleanup: (() => void) | null = null;
-
-    function clearUlwTurnCallback() {
-        if (!ulwTurnCleanup) return;
-        ulwTurnCleanup();
-        ulwTurnCleanup = null;
-    }
 
     function sendTurnText(targetThreadId: string, inputText: string): boolean {
         if (!inputText) return false;
@@ -161,35 +152,6 @@
         return true;
     }
 
-    function registerUlwTurnCallback(targetThreadId: string) {
-        clearUlwTurnCallback();
-        ulwTurnCleanup = messages.onTurnComplete(targetThreadId, (finishedThreadId, finalText) => {
-            ulwTurnCleanup = null;
-            const state = ulwRuntime.get(finishedThreadId);
-            if (!state?.active) return;
-
-            if (hasCompletionPromise(finalText, state.completionPromise)) {
-                ulwRuntime.stop(finishedThreadId, "promise_matched");
-                return;
-            }
-
-            if (state.iteration >= state.maxIterations) {
-                ulwRuntime.stop(finishedThreadId, "max_iterations");
-                return;
-            }
-
-            const next = ulwRuntime.advance(finishedThreadId);
-            if (!next) return;
-
-            registerUlwTurnCallback(finishedThreadId);
-            const sent = sendTurnText(finishedThreadId, buildUlwContinuationPrompt(next));
-            if (!sent) {
-                clearUlwTurnCallback();
-                ulwRuntime.stop(finishedThreadId, "send_error");
-            }
-        });
-    }
-
     function handleSubmit(inputText: string) {
         if (!threadId) return;
 
@@ -198,8 +160,7 @@
 
         const ulwCommand = parseUlwCommand(normalizedInput);
         if (ulwCommand?.kind === "stop") {
-            clearUlwTurnCallback();
-            ulwRuntime.stop(threadId, "user_stop");
+            ulwLoopRunner.stop(threadId, "user_stop");
             handleStop();
             return;
         }
@@ -230,40 +191,28 @@
                 return;
             }
 
-            const state = ulwRuntime.start(threadId, {
+            ulwLoopRunner.start(threadId, {
                 task,
                 maxIterations: ulwCommand.maxIterations,
                 completionPromise: ulwCommand.completionPromise,
+            }, {
+                sendTurn: sendTurnText,
+                onTurnComplete: messages.onTurnComplete.bind(messages),
             });
-
-            registerUlwTurnCallback(threadId);
-            const sent = sendTurnText(threadId, buildUlwKickoffPrompt(state));
-            if (!sent) {
-                clearUlwTurnCallback();
-                ulwRuntime.stop(threadId, "send_error");
-            }
             return;
         }
 
         if (ulwRuntime.isActive(threadId)) {
-            clearUlwTurnCallback();
-            ulwRuntime.stop(threadId, "manual_user_input");
+            ulwLoopRunner.stop(threadId, "manual_user_input");
         }
 
         sendTurnText(threadId, normalizedInput);
     }
 
-    $effect(() => {
-        return () => {
-            clearUlwTurnCallback();
-        };
-    });
-
     function handleStop() {
         if (!threadId) return;
         if (ulwRuntime.isActive(threadId)) {
-            clearUlwTurnCallback();
-            ulwRuntime.stop(threadId, "user_interrupt");
+            ulwLoopRunner.stop(threadId, "user_interrupt");
         }
         const result = messages.interrupt(threadId);
         if (!result.success) {

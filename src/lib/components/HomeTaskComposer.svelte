@@ -65,7 +65,7 @@
       dispatch("taskChange", { value });
     }}
     onkeydown={handleTaskKeydown}
-    placeholder="Fix a bug, build a feature, refactor code..."
+    placeholder="Fix a bug, build a feature, refactor code... (or /u <task>)"
     rows="3"
     disabled={isCreating}
   ></textarea>

@@ -68,6 +68,11 @@ class MessagesStore {
     return this.#streamingReasoningTextByThread.get(threadId) ?? "";
   }
 
+  getThreadTurnStatus(threadId: string | null): TurnStatus | null {
+    if (!threadId) return null;
+    return this.#turnStatusByThread.get(threadId) ?? null;
+  }
+
   interrupt(threadId: string): { success: boolean; error?: string } {
     const turnId = this.#turnIdByThread.get(threadId);
     const turnStatus = this.#turnStatusByThread.get(threadId) ?? null;

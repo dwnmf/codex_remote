@@ -259,3 +259,93 @@ function getRuntime(): UlwRuntime {
 }
 
 export const ulwRuntime = getRuntime();
+
+export type UlwTurnCompleteCallback = (threadId: string, finalText: string) => void;
+
+export interface UlwLoopDeps {
+  sendTurn: (threadId: string, inputText: string) => boolean;
+  onTurnComplete: (threadId: string, callback: UlwTurnCompleteCallback) => () => void;
+}
+
+export class UlwLoopRunner {
+  #cleanupByThread = new Map<string, () => void>();
+  #depsByThread = new Map<string, UlwLoopDeps>();
+
+  #clearTurnHook(threadId: string): void {
+    const cleanup = this.#cleanupByThread.get(threadId);
+    if (!cleanup) return;
+    cleanup();
+    this.#cleanupByThread.delete(threadId);
+  }
+
+  #registerTurnHook(threadId: string): void {
+    this.#clearTurnHook(threadId);
+    const deps = this.#depsByThread.get(threadId);
+    if (!deps) return;
+
+    const cleanup = deps.onTurnComplete(threadId, (finishedThreadId, finalText) => {
+      this.#cleanupByThread.delete(finishedThreadId);
+      const state = ulwRuntime.get(finishedThreadId);
+      if (!state?.active) return;
+
+      if (hasCompletionPromise(finalText, state.completionPromise)) {
+        this.stop(finishedThreadId, "promise_matched");
+        return;
+      }
+
+      if (state.iteration >= state.maxIterations) {
+        this.stop(finishedThreadId, "max_iterations");
+        return;
+      }
+
+      const next = ulwRuntime.advance(finishedThreadId);
+      if (!next) return;
+
+      this.#registerTurnHook(finishedThreadId);
+      const sent = deps.sendTurn(finishedThreadId, buildUlwContinuationPrompt(next));
+      if (!sent) {
+        this.stop(finishedThreadId, "send_error");
+      }
+    });
+
+    this.#cleanupByThread.set(threadId, cleanup);
+  }
+
+  start(threadId: string, options: StartOptions, deps: UlwLoopDeps): UlwState {
+    this.stop(threadId, "restart");
+    this.#depsByThread.set(threadId, deps);
+
+    const state = ulwRuntime.start(threadId, options);
+    this.#registerTurnHook(threadId);
+
+    const sent = deps.sendTurn(threadId, buildUlwKickoffPrompt(state));
+    if (!sent) {
+      this.stop(threadId, "send_error");
+    }
+
+    return state;
+  }
+
+  stop(threadId: string, reason = "stopped"): void {
+    this.#clearTurnHook(threadId);
+    this.#depsByThread.delete(threadId);
+    ulwRuntime.stop(threadId, reason);
+  }
+
+  updateDeps(threadId: string, deps: UlwLoopDeps): void {
+    if (!ulwRuntime.isActive(threadId)) return;
+    this.#depsByThread.set(threadId, deps);
+  }
+}
+
+const RUNNER_KEY = "__zane_ulw_loop_runner__";
+
+function getRunner(): UlwLoopRunner {
+  const global = globalThis as Record<string, unknown>;
+  if (!global[RUNNER_KEY]) {
+    global[RUNNER_KEY] = new UlwLoopRunner();
+  }
+  return global[RUNNER_KEY] as UlwLoopRunner;
+}
+
+export const ulwLoopRunner = getRunner();

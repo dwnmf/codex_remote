@@ -1,13 +1,23 @@
 <script lang="ts">
   import { socket } from "../lib/socket.svelte";
   import { threads } from "../lib/threads.svelte";
+  import { messages } from "../lib/messages.svelte";
   import { theme } from "../lib/theme.svelte";
   import { models } from "../lib/models.svelte";
+  import { anchors } from "../lib/anchors.svelte";
+  import { auth } from "../lib/auth.svelte";
   import { worktrees } from "../lib/worktrees.svelte";
+  import {
+    parseUlwCommand,
+    pickUlwTaskFromMessages,
+    ulwLoopRunner,
+    ulwRuntime,
+  } from "../lib/ulw";
   import AppHeader from "../lib/components/AppHeader.svelte";
   import HomeTaskComposer from "../lib/components/HomeTaskComposer.svelte";
   import WorktreeModal from "../lib/components/WorktreeModal.svelte";
   import RecentSessionsList from "../lib/components/RecentSessionsList.svelte";
+  import MessageBlock from "../lib/components/MessageBlock.svelte";
   import type { ModeKind } from "../lib/types";
 
   const themeIcons = { system: "◐", light: "○", dark: "●" } as const;
@@ -21,6 +31,7 @@
     id: number;
     task: string;
     project: string;
+    threadId: string | null;
     mode: ModeKind;
     selectedModel: string;
     isCreating: boolean;
@@ -51,6 +62,7 @@
         id: index + 1,
         task: "",
         project: "",
+        threadId: null,
         mode: "code",
         selectedModel: "",
         isCreating: false,
@@ -70,12 +82,72 @@
   }
 
   function canSubmit(pane: ComposerPane): boolean {
+    const hasThread = Boolean(pane.threadId);
+    const running = pane.threadId
+      ? (messages.getThreadTurnStatus(pane.threadId) ?? "").toLowerCase() === "inprogress"
+      : false;
     return (
       isConnected &&
       pane.task.trim().length > 0 &&
-      pane.project.trim().length > 0 &&
-      !pane.isCreating
+      (hasThread || pane.project.trim().length > 0) &&
+      !pane.isCreating &&
+      !running
     );
+  }
+
+  function paneIsRunning(pane: ComposerPane): boolean {
+    if (!pane.threadId) return false;
+    return (messages.getThreadTurnStatus(pane.threadId) ?? "").toLowerCase() === "inprogress";
+  }
+
+  function paneMessages(pane: ComposerPane) {
+    if (!pane.threadId) return [];
+    return messages.getThreadMessages(pane.threadId).slice(-40);
+  }
+
+  function sendTurnFromPane(paneId: number, targetThreadId: string, inputText: string): string | null {
+    const pane = getPane(paneId);
+    if (!pane) return "Pane not found";
+
+    const text = inputText.trim();
+    if (!text) return "Input is empty";
+
+    const selectedAnchorId = !auth.isLocalMode ? anchors.selectedId : null;
+    if (!auth.isLocalMode) {
+      if (!selectedAnchorId) return "Select a device in Settings before sending messages.";
+      if (!anchors.selected) return "Selected device is offline. Choose another device in Settings.";
+    }
+
+    const params: Record<string, unknown> = {
+      threadId: targetThreadId,
+      input: [{ type: "text", text }],
+      ...(selectedAnchorId ? { anchorId: selectedAnchorId } : {}),
+    };
+
+    const effectiveModel = pane.selectedModel.trim() || models.defaultModel?.value?.trim() || "";
+    if (effectiveModel) {
+      params.model = effectiveModel;
+      params.collaborationMode = threads.resolveCollaborationMode(pane.mode, effectiveModel, "medium");
+    }
+    params.effort = "medium";
+
+    const result = socket.send({
+      method: "turn/start",
+      id: Date.now(),
+      params,
+    });
+
+    return result.success ? null : result.error ?? "Failed to send message";
+  }
+
+  function handleStopPane(paneId: number) {
+    const pane = getPane(paneId);
+    if (!pane?.threadId) return;
+    ulwLoopRunner.stop(pane.threadId, "user_interrupt");
+    const result = messages.interrupt(pane.threadId);
+    if (!result.success) {
+      updatePane(paneId, { submitError: result.error ?? "Failed to stop turn" });
+    }
   }
 
   function modelLabelFor(pane: ComposerPane): string {
@@ -133,7 +205,13 @@
 
   async function handleProjectConfirm(value: string) {
     if (activePaneId == null) return;
-    updatePane(activePaneId, { project: value });
+    const pane = getPane(activePaneId);
+    if (pane?.threadId && pane.project.trim() !== value.trim()) {
+      ulwLoopRunner.stop(pane.threadId, "project_changed");
+      updatePane(activePaneId, { project: value, threadId: null, submitError: null });
+    } else {
+      updatePane(activePaneId, { project: value });
+    }
     worktreeModalOpen = false;
     worktrees.select(value);
     if (!worktrees.repoRoot) {
@@ -143,7 +221,79 @@
 
   async function handleSubmit(paneId: number) {
     const pane = getPane(paneId);
-    if (!pane || !canSubmit(pane) || pane.pendingStartToken !== null) return;
+    if (!pane || !canSubmit(pane)) return;
+
+    const rawInput = pane.task.trim();
+    const ulwCommand = parseUlwCommand(rawInput);
+    const loopDeps = {
+      sendTurn: (threadId: string, inputText: string) =>
+        sendTurnFromPane(paneId, threadId, inputText) === null,
+      onTurnComplete: messages.onTurnComplete.bind(messages),
+    };
+
+    if (pane.threadId) {
+      if (ulwCommand?.kind === "stop") {
+        handleStopPane(paneId);
+        updatePane(paneId, { task: "", submitError: null });
+        return;
+      }
+
+      if (ulwCommand?.kind === "config") {
+        if (
+          typeof ulwCommand.maxIterations !== "number" &&
+          !ulwCommand.completionPromise
+        ) {
+          updatePane(paneId, { submitError: "Usage: /u config max=30 promise=DONE" });
+          return;
+        }
+        ulwRuntime.configure(pane.threadId, {
+          maxIterations: ulwCommand.maxIterations,
+          completionPromise: ulwCommand.completionPromise,
+        });
+        updatePane(paneId, { task: "", submitError: null });
+        return;
+      }
+
+      if (ulwCommand?.kind === "start") {
+        const task =
+          ulwCommand.task ?? pickUlwTaskFromMessages(messages.getThreadMessages(pane.threadId));
+        if (!task) {
+          updatePane(paneId, { submitError: "Add task after /u for this window." });
+          return;
+        }
+        ulwLoopRunner.start(
+          pane.threadId,
+          {
+            task,
+            maxIterations: ulwCommand.maxIterations,
+            completionPromise: ulwCommand.completionPromise,
+          },
+          loopDeps,
+        );
+        updatePane(paneId, { task: "", submitError: null });
+        return;
+      }
+
+      if (ulwRuntime.isActive(pane.threadId)) {
+        ulwLoopRunner.stop(pane.threadId, "manual_user_input");
+      }
+      const error = sendTurnFromPane(paneId, pane.threadId, rawInput);
+      updatePane(paneId, {
+        task: error ? pane.task : "",
+        submitError: error,
+      });
+      return;
+    }
+
+    if (pane.pendingStartToken !== null) return;
+    if (ulwCommand?.kind === "stop") {
+      updatePane(paneId, { submitError: "Use /u stop inside an active window terminal." });
+      return;
+    }
+    if (ulwCommand?.kind === "config") {
+      updatePane(paneId, { submitError: "Start a window session first, then run /u config." });
+      return;
+    }
 
     const token = Date.now() + Math.floor(Math.random() * 1000);
     updatePane(paneId, { isCreating: true, pendingStartToken: token, submitError: null });
@@ -157,12 +307,29 @@
         ? threads.resolveCollaborationMode(pane.mode, effectiveModel, "medium")
         : undefined;
 
-      threads.start(pane.project.trim(), pane.task.trim(), {
+      const startInput = ulwCommand?.kind === "start" ? undefined : rawInput;
+      threads.start(pane.project.trim(), startInput, {
         suppressNavigation: true,
         ...(collaborationMode ? { collaborationMode } : {}),
-        onThreadStarted: () => {
-          updatePane(paneId, { task: "" });
+        onThreadStarted: (threadId) => {
+          updatePane(paneId, { task: "", threadId, submitError: null });
           clearPendingStart(paneId, token);
+
+          if (ulwCommand?.kind === "start") {
+            if (!ulwCommand.task) {
+              updatePane(paneId, { submitError: "Add task after /u when launching from Home." });
+              return;
+            }
+            ulwLoopRunner.start(
+              threadId,
+              {
+                task: ulwCommand.task,
+                maxIterations: ulwCommand.maxIterations,
+                completionPromise: ulwCommand.completionPromise,
+              },
+              loopDeps,
+            );
+          }
         },
         onThreadStartFailed: (error) => {
           updatePane(paneId, { submitError: error.message || "Failed to create task" });
@@ -279,6 +446,31 @@
                 on:selectModel={(e) => handleSelectModel(pane.id, e.detail.value)}
                 on:submit={() => handleSubmit(pane.id)}
               />
+
+              {#if pane.threadId}
+                <section class="pane-terminal stack">
+                  <div class="pane-terminal-header split">
+                    <span>Terminal • {pane.threadId.slice(0, 8)}</span>
+                    <div class="pane-terminal-actions row">
+                      {#if paneIsRunning(pane)}
+                        <button type="button" class="terminal-stop" onclick={() => handleStopPane(pane.id)}>
+                          Stop
+                        </button>
+                      {/if}
+                      <a href={"/thread/" + pane.threadId}>Open</a>
+                    </div>
+                  </div>
+                  <div class="pane-terminal-body">
+                    {#if paneMessages(pane).length === 0}
+                      <div class="pane-terminal-empty">Waiting for output...</div>
+                    {:else}
+                      {#each paneMessages(pane) as message (message.id)}
+                        <MessageBlock {message} />
+                      {/each}
+                    {/if}
+                  </div>
+                </section>
+              {/if}
             </div>
           {/each}
         </section>
@@ -412,6 +604,61 @@
 
   .pane-status {
     color: var(--cli-prefix-agent);
+  }
+
+  .pane-terminal {
+    --stack-gap: 0;
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--cli-bg);
+  }
+
+  .pane-terminal-header {
+    --split-gap: var(--space-sm);
+    padding: 0.42rem 0.62rem;
+    border-bottom: 1px solid var(--cli-border);
+    color: var(--cli-text-dim);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: var(--cli-bg-elevated);
+  }
+
+  .pane-terminal-actions {
+    --row-gap: var(--space-sm);
+    align-items: center;
+  }
+
+  .pane-terminal-actions a {
+    color: var(--cli-prefix-agent);
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  .terminal-stop {
+    border: 1px solid color-mix(in srgb, var(--cli-error) 40%, var(--cli-border));
+    background: transparent;
+    color: var(--cli-error);
+    border-radius: var(--radius-sm);
+    padding: 0.16rem 0.4rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+
+  .pane-terminal-body {
+    max-height: 15rem;
+    overflow-y: auto;
+    padding: var(--space-xs) 0;
+  }
+
+  .pane-terminal-empty {
+    padding: var(--space-sm) var(--space-md);
+    color: var(--cli-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
   }
 
   .error {
