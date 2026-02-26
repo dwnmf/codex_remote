@@ -7,8 +7,19 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+SERVICE_ROOT = Path(__file__).resolve().parents[1]
+if str(SERVICE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVICE_ROOT))
+
 
 def _reload_app_modules() -> None:
+    db_module = sys.modules.get("app.db")
+    if db_module is not None:
+        db_obj = getattr(db_module, "db", None)
+        close_fn = getattr(db_obj, "close", None)
+        if callable(close_fn):
+            close_fn()
+
     for name in list(sys.modules.keys()):
         if name == "app" or name.startswith("app."):
             del sys.modules[name]
@@ -154,6 +165,44 @@ def test_device_flow_anchor_token_refresh_and_ws_preflight(tmp_path: Path, monke
         assert new_preflight.status_code == 426
 
 
+def test_websocket_relay_isolated_per_user(tmp_path: Path, monkeypatch) -> None:
+    client = _make_client(tmp_path, monkeypatch, auth_mode="basic")
+    with client:
+        user_a = _register_basic(client, f"user-a-{uuid.uuid4().hex[:8]}")
+        user_b = _register_basic(client, f"user-b-{uuid.uuid4().hex[:8]}")
+        anchor_a_tokens = _issue_anchor_tokens(client, user_a["token"])
+        anchor_b_tokens = _issue_anchor_tokens(client, user_b["token"])
+
+        with client.websocket_connect(f"/ws/anchor?token={anchor_a_tokens['anchorAccessToken']}") as anchor_a_ws:
+            assert anchor_a_ws.receive_json()["type"] == "orbit.hello"
+            anchor_a_ws.send_json({"type": "anchor.hello", "hostname": "anchor-a", "platform": "linux", "anchorId": "anchor-a"})
+
+            with client.websocket_connect(f"/ws/anchor?token={anchor_b_tokens['anchorAccessToken']}") as anchor_b_ws:
+                assert anchor_b_ws.receive_json()["type"] == "orbit.hello"
+                anchor_b_ws.send_json(
+                    {"type": "anchor.hello", "hostname": "anchor-b", "platform": "linux", "anchorId": "anchor-b"}
+                )
+
+                with client.websocket_connect(f"/ws/client?token={user_a['token']}&clientId=user-a-client") as client_a_ws:
+                    assert _recv_until(client_a_ws, lambda msg: msg.get("type") == "orbit.hello")["role"] == "client"
+
+                    client_a_ws.send_json({"type": "orbit.list-anchors"})
+                    anchors_msg = _recv_until(client_a_ws, lambda msg: msg.get("type") == "orbit.anchors")
+                    anchors = anchors_msg.get("anchors") or []
+                    assert [item.get("id") for item in anchors] == ["anchor-a"]
+
+                    client_a_ws.send_json({"id": 710, "method": "thread/start", "params": {"cwd": ".", "anchorId": "anchor-b"}})
+                    cross_user = _recv_until(client_a_ws, lambda msg: msg.get("id") == 710 and msg.get("error"))
+                    assert _rpc_error_code(cross_user) == "anchor_not_found"
+
+                    client_a_ws.send_json({"id": 711, "method": "thread/start", "params": {"cwd": "."}})
+                    routed = _recv_until(anchor_a_ws, lambda msg: msg.get("id") == 711 and msg.get("method") == "thread/start")
+                    assert routed.get("id") == 711
+                    anchor_a_ws.send_json({"id": 711, "result": {"thread": {"id": "isolated-thread"}}})
+                    finished = _recv_until(client_a_ws, lambda msg: msg.get("id") == 711 and isinstance(msg.get("result"), dict))
+                    assert finished.get("result", {}).get("thread", {}).get("id") == "isolated-thread"
+
+
 def test_websocket_relay_subscription_and_protocol_messages(tmp_path: Path, monkeypatch) -> None:
     client = _make_client(tmp_path, monkeypatch, auth_mode="basic")
     with client:
@@ -279,12 +328,36 @@ def test_websocket_targeted_routing_with_anchor_selection_and_errors(tmp_path: P
                     missing = _recv_until(client_ws, lambda msg: msg.get("id") == 903 and msg.get("error"))
                     assert _rpc_error_code(missing) == "anchor_not_found"
 
+                    anchor_b_ws.send_json({"type": "orbit.subscribe", "threadId": "thread-target"})
+                    anchor_b_subscribed = _recv_until(
+                        anchor_b_ws,
+                        lambda msg: msg.get("type") == "orbit.subscribed" and msg.get("threadId") == "thread-target",
+                    )
+                    assert anchor_b_subscribed["threadId"] == "thread-target"
+
                     anchor_a_ws.close()
                     _recv_until(client_ws, lambda msg: msg.get("type") == "orbit.anchor-disconnected" and msg.get("anchorId") == "anchor-a")
 
                     client_ws.send_json({"id": 904, "method": "turn/start", "params": {"threadId": "thread-target", "input": []}})
-                    offline = _recv_until(client_ws, lambda msg: msg.get("id") == 904 and msg.get("error"))
-                    assert _rpc_error_code(offline) == "anchor_offline"
+                    rerouted = _recv_until(
+                        anchor_b_ws,
+                        lambda msg: msg.get("id") == 904 and msg.get("method") == "turn/start",
+                    )
+                    assert rerouted.get("params", {}).get("threadId") == "thread-target"
+
+
+def test_register_basic_handles_create_user_uniqueness_race(tmp_path: Path, monkeypatch) -> None:
+    client = _make_client(tmp_path, monkeypatch, auth_mode="basic")
+    with client:
+        username = f"user-{uuid.uuid4().hex[:8]}"
+        _register_basic(client, username)
+
+        app_main = importlib.import_module("app.main")
+        monkeypatch.setattr(app_main.db, "get_user_by_name", lambda _name: None)
+
+        response = client.post("/auth/register/basic", json={"name": username})
+        assert response.status_code == 400
+        assert response.json().get("error") == "User already exists."
 
 
 def test_anchor_reconnect_after_disconnect(tmp_path: Path, monkeypatch) -> None:

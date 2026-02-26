@@ -48,10 +48,9 @@ export async function verifyJwtHs256(
   }>(payloadPart);
   if (!payload) return false;
   if (payload.iss !== expected.issuer) return false;
-  if (payload.aud) {
-    const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!audiences.includes(expected.audience)) return false;
-  }
+  if (!payload.aud) return false;
+  const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  if (!audiences.includes(expected.audience)) return false;
   if (typeof payload.exp === "number") {
     const now = Math.floor(Date.now() / 1000);
     if (now > payload.exp + clockSkewSec) return false;

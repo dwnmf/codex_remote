@@ -69,6 +69,10 @@ class AnchorSessionRecord:
     revoked_at: int | None
 
 
+class UserNameAlreadyExistsError(Exception):
+    pass
+
+
 def _now_sec() -> int:
     return int(time.time())
 
@@ -84,6 +88,17 @@ class Database:
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
+
+    def close(self) -> None:
+        if not hasattr(self, "_conn"):
+            return
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
+    def __del__(self) -> None:
+        self.close()
 
     def _init_schema(self) -> None:
         cur = self._conn.cursor()
@@ -191,10 +206,16 @@ class Database:
         user_id = uuid.uuid4().hex
         now = _now_sec()
         clean_display = (display_name or name).strip() or name
-        self._conn.execute(
-            "INSERT INTO users (id, name, display_name, created_at) VALUES (?, ?, ?, ?)",
-            (user_id, name, clean_display, now),
-        )
+        try:
+            self._conn.execute(
+                "INSERT INTO users (id, name, display_name, created_at) VALUES (?, ?, ?, ?)",
+                (user_id, name, clean_display, now),
+            )
+        except sqlite3.IntegrityError as exc:
+            self._conn.rollback()
+            if "users.name" in str(exc).lower():
+                raise UserNameAlreadyExistsError(name) from exc
+            raise
         self._conn.commit()
         return User(id=user_id, name=name, display_name=clean_display)
 
@@ -321,36 +342,54 @@ class Database:
         return cur.rowcount == 1
 
     def consume_device_code(self, device_code: str) -> DeviceCodeRecord | None:
-        row = self._conn.execute(
-            """
-            SELECT device_code, user_code, status, user_id, expires_at
-            FROM device_codes
-            WHERE device_code = ?
-            """,
-            (device_code,),
-        ).fetchone()
-        if not row:
-            return None
+        for _ in range(3):
+            now = _now_sec()
+            row = self._conn.execute(
+                """
+                DELETE FROM device_codes
+                WHERE device_code = ? AND status = 'authorised' AND expires_at > ?
+                RETURNING device_code, user_code, status, user_id, expires_at
+                """,
+                (device_code, now),
+            ).fetchone()
+            if row:
+                self._conn.commit()
+                return DeviceCodeRecord(
+                    device_code=row["device_code"],
+                    user_code=row["user_code"],
+                    status=row["status"],
+                    user_id=row["user_id"],
+                    expires_at=row["expires_at"],
+                )
 
-        now = _now_sec()
-        record = DeviceCodeRecord(
-            device_code=row["device_code"],
-            user_code=row["user_code"],
-            status=row["status"],
-            user_id=row["user_id"],
-            expires_at=row["expires_at"],
-        )
+            expired = self._conn.execute(
+                "DELETE FROM device_codes WHERE device_code = ? AND expires_at <= ?",
+                (device_code, now),
+            )
+            if expired.rowcount > 0:
+                self._conn.commit()
+                return None
 
-        if record.expires_at <= now:
-            self._conn.execute("DELETE FROM device_codes WHERE device_code = ?", (device_code,))
-            self._conn.commit()
-            return None
+            row = self._conn.execute(
+                """
+                SELECT device_code, user_code, status, user_id, expires_at
+                FROM device_codes
+                WHERE device_code = ?
+                """,
+                (device_code,),
+            ).fetchone()
+            if not row:
+                return None
+            if row["status"] != "authorised" or row["expires_at"] <= now:
+                return DeviceCodeRecord(
+                    device_code=row["device_code"],
+                    user_code=row["user_code"],
+                    status=row["status"],
+                    user_id=row["user_id"],
+                    expires_at=row["expires_at"],
+                )
 
-        if record.status == "authorised":
-            self._conn.execute("DELETE FROM device_codes WHERE device_code = ?", (device_code,))
-            self._conn.commit()
-
-        return record
+        return None
 
     def cleanup_expired_challenges(self) -> None:
         now = _now_sec()
@@ -381,33 +420,26 @@ class Database:
         now = _now_sec()
         row = self._conn.execute(
             """
-            SELECT challenge, kind, user_id, pending_name, pending_display_name, expires_at
-            FROM auth_challenges
-            WHERE challenge = ?
+            DELETE FROM auth_challenges
+            WHERE challenge = ? AND kind = ? AND expires_at > ?
+            RETURNING challenge, kind, user_id, pending_name, pending_display_name, expires_at
             """,
-            (challenge,),
+            (challenge, expected_kind, now),
         ).fetchone()
+        if row:
+            self._conn.commit()
+            return ChallengeRecord(
+                challenge=row["challenge"],
+                kind=row["kind"],
+                user_id=row["user_id"],
+                pending_name=row["pending_name"],
+                pending_display_name=row["pending_display_name"],
+                expires_at=row["expires_at"],
+            )
 
         self._conn.execute("DELETE FROM auth_challenges WHERE challenge = ?", (challenge,))
         self._conn.commit()
-
-        if not row:
-            return None
-
-        record = ChallengeRecord(
-            challenge=row["challenge"],
-            kind=row["kind"],
-            user_id=row["user_id"],
-            pending_name=row["pending_name"],
-            pending_display_name=row["pending_display_name"],
-            expires_at=row["expires_at"],
-        )
-
-        if record.kind != expected_kind:
-            return None
-        if record.expires_at <= now:
-            return None
-        return record
+        return None
 
     def list_passkey_credentials(self, user_id: str) -> list[PasskeyCredential]:
         rows = self._conn.execute(

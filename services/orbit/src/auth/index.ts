@@ -10,6 +10,7 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
+import { SignJWT } from "jose";
 
 import type { AuthEnv } from "./env";
 import type { ChallengeRecord, DeviceCodeRecord, StoredCredential, StoredUser } from "./types";
@@ -53,6 +54,37 @@ interface LoginOptionsRequest {
 
 interface LoginVerifyRequest {
   credential: AuthenticationResponseJSON;
+}
+
+const ANCHOR_ACCESS_TOKEN_TTL_SEC = 60 * 60;
+
+function extractChallengeFromClientData(clientDataJSON: unknown): string | null {
+  if (typeof clientDataJSON !== "string" || !clientDataJSON) return null;
+  try {
+    const decoded = new TextDecoder().decode(base64UrlDecode(clientDataJSON));
+    const clientData = JSON.parse(decoded) as { challenge?: unknown };
+    if (typeof clientData.challenge !== "string" || !clientData.challenge) return null;
+    return clientData.challenge;
+  } catch {
+    return null;
+  }
+}
+
+async function createAnchorAccessToken(env: AuthEnv, userId: string): Promise<{ token: string; expiresIn: number } | null> {
+  const secret = env.ZANE_ANCHOR_JWT_SECRET?.trim();
+  if (!secret) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  const token = await new SignJWT({})
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(userId)
+    .setIssuer("zane-anchor")
+    .setAudience("zane-orbit-anchor")
+    .setIssuedAt(now)
+    .setExpirationTime(now + ANCHOR_ACCESS_TOKEN_TTL_SEC)
+    .sign(new TextEncoder().encode(secret));
+
+  return { token, expiresIn: ANCHOR_ACCESS_TOKEN_TTL_SEC };
 }
 
 export class PasskeyChallengeStore extends DurableObject<AuthEnv> {
@@ -258,13 +290,12 @@ async function handleRegisterVerify(req: Request, env: AuthEnv): Promise<Respons
   }
 
   // Extract and consume the challenge before verification
-  const clientDataB64 = body.credential.response.clientDataJSON;
-  const clientData = JSON.parse(new TextDecoder().decode(base64UrlDecode(clientDataB64))) as { challenge?: string };
-  if (!clientData.challenge) {
-    return Response.json({ error: "Missing challenge." }, { status: 400, headers: authCorsHeaders(req, env) });
+  const challenge = extractChallengeFromClientData(body.credential.response.clientDataJSON);
+  if (!challenge) {
+    return Response.json({ error: "Malformed clientDataJSON." }, { status: 400, headers: authCorsHeaders(req, env) });
   }
 
-  const challengeRecord = await consumeChallenge(env, clientData.challenge);
+  const challengeRecord = await consumeChallenge(env, challenge);
   if (!challengeRecord) {
     return Response.json({ error: "Registration challenge expired." }, { status: 400, headers: authCorsHeaders(req, env) });
   }
@@ -405,13 +436,12 @@ async function handleLoginVerify(req: Request, env: AuthEnv): Promise<Response> 
   }
 
   // Extract challenge from clientDataJSON to consume the stored record
-  const clientDataB64 = body.credential.response.clientDataJSON;
-  const clientData = JSON.parse(new TextDecoder().decode(base64UrlDecode(clientDataB64))) as { challenge?: string };
-  if (!clientData.challenge) {
-    return Response.json({ error: "Missing challenge." }, { status: 400, headers: authCorsHeaders(req, env) });
+  const challenge = extractChallengeFromClientData(body.credential.response.clientDataJSON);
+  if (!challenge) {
+    return Response.json({ error: "Malformed clientDataJSON." }, { status: 400, headers: authCorsHeaders(req, env) });
   }
 
-  const challengeRecord = await consumeChallenge(env, clientData.challenge);
+  const challengeRecord = await consumeChallenge(env, challenge);
   if (!challengeRecord) {
     return Response.json(
       { error: "Authentication challenge expired." },
@@ -615,6 +645,39 @@ async function handleRefresh(req: Request, env: AuthEnv): Promise<Response> {
   );
 }
 
+async function handleDeviceRefresh(req: Request, env: AuthEnv): Promise<Response> {
+  let body: { refreshToken?: string };
+  try {
+    body = (await req.json()) as { refreshToken?: string };
+  } catch {
+    return Response.json({ error: "Invalid request body." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  if (!body?.refreshToken) {
+    return Response.json({ error: "refreshToken is required." }, { status: 400, headers: authCorsHeaders(req, env) });
+  }
+
+  const result = await refreshSession(env, body.refreshToken);
+  if (!result) {
+    return Response.json({ error: "Invalid or expired refresh token." }, { status: 401, headers: authCorsHeaders(req, env) });
+  }
+
+  const anchorAccess = await createAnchorAccessToken(env, result.user.id);
+  if (!anchorAccess) {
+    return Response.json({ error: "Anchor secret not configured on Orbit." }, { status: 503, headers: authCorsHeaders(req, env) });
+  }
+
+  return Response.json(
+    {
+      anchorAccessToken: anchorAccess.token,
+      anchorRefreshToken: result.tokens.refreshToken,
+      anchorAccessExpiresIn: anchorAccess.expiresIn,
+      userId: result.user.id,
+    },
+    { status: 200, headers: authCorsHeaders(req, env) }
+  );
+}
+
 async function handleLogout(req: Request, env: AuthEnv): Promise<Response> {
   const session = await verifySession(req, env);
   if (session) {
@@ -655,6 +718,10 @@ export async function handleAuthRequest(req: Request, env: AuthEnv): Promise<Res
 
   if (url.pathname === "/auth/refresh" && req.method === "POST") {
     return await handleRefresh(req, env);
+  }
+
+  if (url.pathname === "/auth/device/refresh" && req.method === "POST") {
+    return await handleDeviceRefresh(req, env);
   }
 
   if (url.pathname === "/auth/logout" && req.method === "POST") {

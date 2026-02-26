@@ -10,6 +10,7 @@ const HEARTBEAT_INTERVAL = 30_000;
 const HEARTBEAT_TIMEOUT = 10_000;
 const RECONNECT_DELAY = 2_000;
 const CLIENT_ID_KEY = "__zane_client_id__";
+const LOCAL_MODE_TOKEN = "local-mode";
 
 function getClientId(): string | null {
   if (typeof window === "undefined") return null;
@@ -23,6 +24,12 @@ function getClientId(): string | null {
   } catch {
     return null;
   }
+}
+
+function normalizeToken(token?: string | null): string | null {
+  const value = token?.trim();
+  if (!value || value === LOCAL_MODE_TOKEN) return null;
+  return value;
 }
 
 export interface SendResult {
@@ -70,12 +77,19 @@ class SocketStore {
     return this.status === "connected" && this.#socket?.readyState === WebSocket.OPEN;
   }
 
-  connect(url: string, token?: string | null) {
-    this.#intentionalDisconnect = false;
-    this.#connect(url, token ?? null);
+  setAuthToken(token?: string | null) {
+    this.#token = normalizeToken(token);
   }
 
-  #connect(url: string, token: string | null) {
+  connect(url: string, token?: string | null) {
+    this.#intentionalDisconnect = false;
+    if (token !== undefined) {
+      this.setAuthToken(token);
+    }
+    this.#connect(url);
+  }
+
+  #connect(url: string) {
     if (this.#socket) {
       this.#cleanup();
     }
@@ -89,12 +103,13 @@ class SocketStore {
     }
 
     this.#url = trimmed;
-    this.#token = token;
     this.status = "connecting";
     this.error = null;
 
     try {
       const wsUrl = new URL(trimmed);
+      const urlToken = normalizeToken(wsUrl.searchParams.get("token"));
+      const token = urlToken ?? this.#token;
       if (token) {
         wsUrl.searchParams.set("token", token);
       }
@@ -327,7 +342,7 @@ class SocketStore {
     if (this.status === "connected" || this.status === "connecting") return;
     this.#intentionalDisconnect = false;
     this.#clearReconnectTimeout();
-    this.#connect(this.#url, this.#token);
+    this.#connect(this.#url);
   }
 
   subscribeThread(threadId: string): SendResult {
@@ -396,7 +411,7 @@ class SocketStore {
     this.#reconnectTimeout = setTimeout(() => {
       this.#reconnectTimeout = null;
       if (!this.#intentionalDisconnect) {
-        this.#connect(this.#url, this.#token);
+        this.#connect(this.#url);
       }
     }, RECONNECT_DELAY);
   }

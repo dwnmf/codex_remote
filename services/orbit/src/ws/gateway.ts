@@ -6,7 +6,7 @@ export async function handleWsRequest(req: Request, env: Env): Promise<Response 
   const role = getRoleFromPath(url.pathname);
   if (!role) return null;
 
-  const authResult = await isAuthorised(req, env);
+  const authResult = await isAuthorised(req, env, role);
   if (!authResult.authorised) {
     console.warn(`[orbit] ws auth failed: ${url.pathname}`);
     return new Response("Unauthorised", { status: 401 });

@@ -7,13 +7,17 @@ export function getRoleFromPath(pathname: string): Role | null {
   return null;
 }
 
-export async function isAuthorised(req: Request, env: Env): Promise<AuthResult> {
+export async function isAuthorised(req: Request, env: Env, role: Role): Promise<AuthResult> {
   const denied: AuthResult = { authorised: false, userId: null, jwtType: null };
 
   const userSecret = env.ZANE_WEB_JWT_SECRET?.trim();
   const anchorSecret = env.ZANE_ANCHOR_JWT_SECRET?.trim();
-  if (!userSecret && !anchorSecret) {
-    console.error("[orbit] auth: no secrets configured, denying request");
+  if (role === "client" && !userSecret) {
+    console.error("[orbit] auth: web secret not configured, denying client request");
+    return denied;
+  }
+  if (role === "anchor" && !anchorSecret) {
+    console.error("[orbit] auth: anchor secret not configured, denying anchor request");
     return denied;
   }
 
@@ -23,10 +27,14 @@ export async function isAuthorised(req: Request, env: Env): Promise<AuthResult> 
     return denied;
   }
 
-  const user = await verifyOrbitUserJwt(provided, env);
-  if (user.ok) {
-    console.log(`[orbit] auth: web JWT accepted, userId=${user.userId}`);
-    return { authorised: true, userId: user.userId, jwtType: "web" };
+  if (role === "client") {
+    const user = await verifyOrbitUserJwt(provided, env);
+    if (user.ok) {
+      console.log(`[orbit] auth: web JWT accepted, userId=${user.userId}`);
+      return { authorised: true, userId: user.userId, jwtType: "web" };
+    }
+    console.warn("[orbit] auth: client token rejected");
+    return denied;
   }
 
   const anchor = await verifyOrbitAnchorJwt(provided, env);
@@ -35,6 +43,6 @@ export async function isAuthorised(req: Request, env: Env): Promise<AuthResult> 
     return { authorised: true, userId: anchor.userId, jwtType: "anchor" };
   }
 
-  console.warn("[orbit] auth: token rejected");
+  console.warn("[orbit] auth: anchor token rejected");
   return denied;
 }

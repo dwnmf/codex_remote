@@ -470,7 +470,7 @@ export class OrbitRelay {
 
   private messageIdKey(id: string | number | null): string | null {
     if (id == null) return null;
-    return String(id);
+    return typeof id === "number" ? `n:${id}` : `s:${id}`;
   }
 
   private routeKey(source: WebSocket, id: string): string {
@@ -620,7 +620,7 @@ export class OrbitRelay {
 
     try {
       await this.env.DB.prepare(
-        "INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth"
+        "INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth"
       )
         .bind(this.userId, endpoint, p256dh, auth, Math.floor(Date.now() / 1000))
         .run();

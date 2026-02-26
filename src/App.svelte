@@ -3,7 +3,12 @@
   import AuthGate from "./lib/components/AuthGate.svelte";
   import { connectionManager } from "./lib/connection-manager.svelte";
   import { auth } from "./lib/auth.svelte";
+  import { socket } from "./lib/socket.svelte";
   import "./router";
+
+  $effect(() => {
+    socket.setAuthToken(auth.token);
+  });
 
   $effect(() => {
     if (auth.status === "signed_in") {

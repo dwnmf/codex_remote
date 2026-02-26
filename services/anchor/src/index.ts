@@ -1,6 +1,7 @@
 import { hostname, homedir } from "node:os";
 import { mkdir, readdir } from "node:fs/promises";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { timingSafeEqual } from "node:crypto";
 import type { WsClient } from "./types";
 
 const PORT = Number(process.env.ANCHOR_PORT ?? 8788);
@@ -9,6 +10,8 @@ const ANCHOR_JWT_TTL_SEC = Number(process.env.ANCHOR_JWT_TTL_SEC ?? 300);
 const AUTH_URL = process.env.AUTH_URL ?? "";
 const FORCE_LOGIN = process.env.ZANE_FORCE_LOGIN === "1";
 const CREDENTIALS_FILE = process.env.ZANE_CREDENTIALS_FILE ?? "";
+const ANCHOR_WS_TOKEN = (process.env.ANCHOR_WS_TOKEN ?? "").trim();
+const ANCHOR_WS_ALLOW_PUBLIC = process.env.ANCHOR_WS_ALLOW_PUBLIC === "1";
 const startedAt = Date.now();
 
 let ZANE_ANCHOR_JWT_SECRET = "";
@@ -1009,6 +1012,96 @@ function buildAnchorHelloPayload() {
   };
 }
 
+function normalizeOptionalValue(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeIpAddress(address: string): string {
+  const trimmed = address.trim();
+  return trimmed.startsWith("::ffff:") ? trimmed.slice("::ffff:".length) : trimmed;
+}
+
+function isPrivateOrLocalIpv4(address: string): boolean {
+  const octets = address.split(".").map((part) => Number(part));
+  if (octets.length !== 4 || octets.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  const [a, b] = octets;
+  if (a === 127) return true; // loopback
+  if (a === 10) return true; // RFC1918
+  if (a === 192 && b === 168) return true; // RFC1918
+  if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT (Tailscale)
+  if (a === 169 && b === 254) return true; // link-local
+  return false;
+}
+
+function isPrivateOrLocalIpv6(address: string): boolean {
+  const lower = address.toLowerCase();
+  if (lower === "::1") return true; // loopback
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // ULA fc00::/7
+  if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) {
+    return true; // link-local fe80::/10
+  }
+  return false;
+}
+
+function isTrustedLocalAddress(address: string): boolean {
+  const normalized = normalizeIpAddress(address);
+  if (normalized.includes(".")) return isPrivateOrLocalIpv4(normalized);
+  return isPrivateOrLocalIpv6(normalized);
+}
+
+function isLoopbackHostname(hostnameValue: string): boolean {
+  const host = hostnameValue.toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+}
+
+function getRequestAddress(req: Request, directAddress?: string | null): string | null {
+  const direct = normalizeOptionalValue(directAddress);
+  if (direct) return normalizeIpAddress(direct);
+
+  const forwarded = normalizeOptionalValue(req.headers.get("x-forwarded-for"));
+  if (!forwarded) return null;
+  const first = normalizeOptionalValue(forwarded.split(",")[0]);
+  if (!first) return null;
+  return normalizeIpAddress(first);
+}
+
+function getPresentedWsToken(req: Request, url: URL): string | null {
+  const fromQuery = normalizeOptionalValue(url.searchParams.get("token"));
+  if (fromQuery) return fromQuery;
+
+  const authHeader = normalizeOptionalValue(req.headers.get("authorization"));
+  if (authHeader) {
+    const match = /^Bearer\s+(.+)$/i.exec(authHeader);
+    const bearer = normalizeOptionalValue(match?.[1]);
+    if (bearer) return bearer;
+  }
+
+  return normalizeOptionalValue(req.headers.get("x-anchor-token"));
+}
+
+function tokensEqual(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left);
+  const rightBytes = Buffer.from(right);
+  if (leftBytes.length !== rightBytes.length) return false;
+  return timingSafeEqual(leftBytes, rightBytes);
+}
+
+function isWsUpgradeAuthorized(req: Request, url: URL, requestAddress: string | null): boolean {
+  if (ANCHOR_WS_TOKEN) {
+    const presented = getPresentedWsToken(req, url);
+    return Boolean(presented && tokensEqual(presented, ANCHOR_WS_TOKEN));
+  }
+
+  if (ANCHOR_WS_ALLOW_PUBLIC) return true;
+  if (requestAddress && isTrustedLocalAddress(requestAddress)) return true;
+  if (!requestAddress && isLoopbackHostname(url.hostname)) return true;
+  return false;
+}
+
 async function deviceLogin(): Promise<boolean> {
   if (!AUTH_URL) {
     console.error("[anchor] AUTH_URL is required for device login");
@@ -1134,6 +1227,14 @@ const server = Bun.serve({
     }
 
     if (url.pathname === "/ws/anchor" || url.pathname === "/ws") {
+      const requestAddress = getRequestAddress(req, server.requestIP(req)?.address);
+      if (!isWsUpgradeAuthorized(req, url, requestAddress)) {
+        const status = ANCHOR_WS_TOKEN ? 401 : 403;
+        const message = ANCHOR_WS_TOKEN
+          ? "Unauthorized"
+          : "Forbidden: local/private clients only (set ANCHOR_WS_ALLOW_PUBLIC=1 to allow all)";
+        return new Response(message, { status });
+      }
       if (server.upgrade(req)) return new Response(null, { status: 101 });
       return new Response("Upgrade required", { status: 426 });
     }
@@ -1218,6 +1319,13 @@ async function startup() {
   console.log(`\nZane Anchor`);
   console.log(`  Local:     http://localhost:${server.port}`);
   console.log(`  WebSocket: ws://localhost:${server.port}/ws`);
+  if (ANCHOR_WS_TOKEN) {
+    console.log(`  WS Access: token required (ANCHOR_WS_TOKEN)`);
+  } else if (ANCHOR_WS_ALLOW_PUBLIC) {
+    console.log(`  WS Access: open (ANCHOR_WS_ALLOW_PUBLIC=1)`);
+  } else {
+    console.log(`  WS Access: local/private network only`);
+  }
 
   if (needsLogin) {
     const ok = await deviceLogin();

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import secrets
 from typing import Any
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +25,7 @@ from .auth import (
     verify_web_token,
 )
 from .config import settings
-from .db import db
+from .db import UserNameAlreadyExistsError, db
 from .passkey import (
     extract_client_data_challenge,
     is_allowed_origin,
@@ -35,7 +36,15 @@ from .passkey import (
 )
 from .relay import RelayHub
 
-app = FastAPI(title="Zane FastAPI Control Plane", version="0.2.0")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    try:
+        yield
+    finally:
+        db.close()
+
+
+app = FastAPI(title="Zane FastAPI Control Plane", version="0.2.0", lifespan=lifespan)
 hub = RelayHub()
 
 app.add_middleware(
@@ -139,7 +148,10 @@ async def auth_register_basic(payload: dict[str, Any]) -> JSONResponse:
     if db.get_user_by_name(name):
         return JSONResponse({"error": "User already exists."}, status_code=400)
 
-    user = db.create_user(name=name, display_name=display_name)
+    try:
+        user = db.create_user(name=name, display_name=display_name)
+    except UserNameAlreadyExistsError:
+        return JSONResponse({"error": "User already exists."}, status_code=400)
     return JSONResponse(create_user_session(user), status_code=200)
 
 
@@ -256,7 +268,10 @@ async def auth_register_verify(request: Request, payload: dict[str, Any]) -> JSO
             return JSONResponse({"error": "Invalid challenge record."}, status_code=400)
         if db.get_user_by_name(pending_name):
             return JSONResponse({"error": "Registration failed."}, status_code=400)
-        user = db.create_user(name=pending_name, display_name=pending_display)
+        try:
+            user = db.create_user(name=pending_name, display_name=pending_display)
+        except UserNameAlreadyExistsError:
+            return JSONResponse({"error": "Registration failed."}, status_code=400)
 
     transports = _extract_transports_payload(credential)
     db.upsert_passkey_credential(
@@ -490,14 +505,16 @@ async def ws_anchor_preflight(request: Request):
 @app.websocket("/ws/client")
 async def ws_client(websocket: WebSocket):
     token = websocket.query_params.get("token")
-    if not token or not _verify_web_session_token(token):
+    payload = _verify_web_session_token(token) if token else None
+    user_id = payload.get("sub") if payload else None
+    if not token or not isinstance(user_id, str):
         await websocket.close(code=1008, reason="Unauthorised")
         return
 
     client_id = websocket.query_params.get("clientId")
 
     await websocket.accept()
-    await hub.register(websocket, "client", client_id=client_id)
+    await hub.register(websocket, "client", user_id=user_id, client_id=client_id)
 
     try:
         while True:
@@ -517,12 +534,14 @@ async def ws_client(websocket: WebSocket):
 @app.websocket("/ws/anchor")
 async def ws_anchor(websocket: WebSocket):
     token = websocket.query_params.get("token")
-    if not token or not verify_anchor_any_token(token):
+    payload = verify_anchor_any_token(token) if token else None
+    user_id = payload.get("sub") if payload else None
+    if not token or not isinstance(user_id, str):
         await websocket.close(code=1008, reason="Unauthorised")
         return
 
     await websocket.accept()
-    await hub.register(websocket, "anchor", client_id=None)
+    await hub.register(websocket, "anchor", user_id=user_id, client_id=None)
 
     try:
         while True:

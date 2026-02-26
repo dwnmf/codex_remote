@@ -26,38 +26,56 @@ class RouteFailure:
     message: str
 
 
+@dataclass
+class BroadcastNotification:
+    sockets: list[WebSocket]
+    payload: dict[str, Any]
+
+
 class RelayHub:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self.client_sockets: dict[WebSocket, set[str]] = {}
         self.anchor_sockets: dict[WebSocket, set[str]] = {}
+        self.socket_to_user_id: dict[WebSocket, str] = {}
+        self.user_to_client_sockets: dict[str, set[WebSocket]] = {}
+        self.user_to_anchor_sockets: dict[str, set[WebSocket]] = {}
         self.anchor_meta: dict[WebSocket, AnchorMeta] = {}
-        self.anchor_id_to_socket: dict[str, WebSocket] = {}
+        self.anchor_id_to_socket: dict[tuple[str, str], WebSocket] = {}
         self.socket_to_anchor_id: dict[WebSocket, str] = {}
-        self.client_id_to_socket: dict[str, WebSocket] = {}
+        self.client_id_to_socket: dict[tuple[str, str], WebSocket] = {}
         self.socket_to_client_id: dict[WebSocket, str] = {}
-        self.thread_to_clients: dict[str, set[WebSocket]] = {}
-        self.thread_to_anchors: dict[str, set[WebSocket]] = {}
-        self.thread_to_anchor_id: dict[str, str] = {}
+        self.thread_to_clients: dict[tuple[str, str], set[WebSocket]] = {}
+        self.thread_to_anchors: dict[tuple[str, str], set[WebSocket]] = {}
+        self.thread_to_anchor_id: dict[tuple[str, str], str] = {}
         self.pending_client_requests: dict[tuple[WebSocket, str], WebSocket] = {}
         self.pending_anchor_requests: dict[tuple[WebSocket, str], WebSocket] = {}
 
-    async def register(self, socket: WebSocket, role: str, client_id: str | None = None) -> None:
+    async def register(self, socket: WebSocket, role: str, user_id: str, client_id: str | None = None) -> None:
+        replaced: WebSocket | None = None
+        notifications: list[BroadcastNotification] = []
         async with self._lock:
             source = self.client_sockets if role == "client" else self.anchor_sockets
+            by_user = self.user_to_client_sockets if role == "client" else self.user_to_anchor_sockets
+            self.socket_to_user_id[socket] = user_id
+            by_user.setdefault(user_id, set()).add(socket)
 
             if role == "client" and client_id:
-                existing = self.client_id_to_socket.get(client_id)
+                existing = self.client_id_to_socket.get((user_id, client_id))
                 if existing and existing is not socket:
-                    await self._remove_socket_locked(existing, "client")
-                    try:
-                        await existing.close(code=1000, reason="Replaced by newer connection")
-                    except Exception:
-                        pass
-                self.client_id_to_socket[client_id] = socket
+                    notifications.extend(self._remove_socket_locked(existing, "client"))
+                    replaced = existing
+                self.client_id_to_socket[(user_id, client_id)] = socket
                 self.socket_to_client_id[socket] = client_id
 
             source[socket] = set()
+
+        await self._flush_notifications(notifications)
+        if replaced:
+            try:
+                await replaced.close(code=1000, reason="Replaced by newer connection")
+            except Exception:
+                pass
 
         await self._send_json(
             socket,
@@ -69,8 +87,10 @@ class RelayHub:
         )
 
     async def unregister(self, socket: WebSocket, role: str) -> None:
+        notifications: list[BroadcastNotification]
         async with self._lock:
-            await self._remove_socket_locked(socket, role)
+            notifications = self._remove_socket_locked(socket, role)
+        await self._flush_notifications(notifications)
 
     async def handle_message(self, socket: WebSocket, role: str, raw_data: str) -> None:
         try:
@@ -80,29 +100,35 @@ class RelayHub:
         except json.JSONDecodeError:
             msg = None
 
+        async with self._lock:
+            user_id = self.socket_to_user_id.get(socket)
+        if not user_id:
+            return
+
         if msg and msg.get("type") == "ping":
             await self._send_json(socket, {"type": "pong"})
             return
 
-        if msg and await self._handle_subscription(socket, role, msg):
+        if msg and await self._handle_subscription(socket, role, user_id, msg):
             return
 
-        if msg and await self._handle_anchor_hello(socket, role, msg):
+        if msg and await self._handle_anchor_hello(socket, role, user_id, msg):
             return
 
-        await self._route_message(socket, role, raw_data, msg)
+        await self._route_message(socket, role, user_id, raw_data, msg)
 
-    async def _handle_subscription(self, socket: WebSocket, role: str, msg: dict[str, Any]) -> bool:
+    async def _handle_subscription(self, socket: WebSocket, role: str, user_id: str, msg: dict[str, Any]) -> bool:
         msg_type = msg.get("type")
         if msg_type == "orbit.subscribe" and isinstance(msg.get("threadId"), str):
             thread_id = msg["threadId"]
             async with self._lock:
-                self._subscribe_socket_locked(socket, role, thread_id)
+                thread_key = self._thread_key(user_id, thread_id)
+                self._subscribe_socket_locked(socket, role, thread_key, thread_id)
                 if role == "anchor":
                     anchor_id = self.socket_to_anchor_id.get(socket)
                     if anchor_id:
-                        self.thread_to_anchor_id[thread_id] = anchor_id
-                anchor_targets = list(self.thread_to_anchors.get(thread_id, set())) if role == "client" else []
+                        self.thread_to_anchor_id[thread_key] = anchor_id
+                anchor_targets = list(self.thread_to_anchors.get(thread_key, set())) if role == "client" else []
 
             await self._send_json(socket, {"type": "orbit.subscribed", "threadId": thread_id})
 
@@ -114,7 +140,7 @@ class RelayHub:
         if msg_type == "orbit.unsubscribe" and isinstance(msg.get("threadId"), str):
             thread_id = msg["threadId"]
             async with self._lock:
-                self._unsubscribe_socket_locked(socket, role, thread_id)
+                self._unsubscribe_socket_locked(socket, role, self._thread_key(user_id, thread_id), thread_id)
             return True
 
         if msg_type == "orbit.list-anchors" and role == "client":
@@ -126,7 +152,8 @@ class RelayHub:
                         "platform": meta.platform,
                         "connectedAt": meta.connected_at,
                     }
-                    for meta in self.anchor_meta.values()
+                    for anchor_socket, meta in self.anchor_meta.items()
+                    if self.socket_to_user_id.get(anchor_socket) == user_id
                 ]
             await self._send_json(socket, {"type": "orbit.anchors", "anchors": anchors})
             return True
@@ -136,7 +163,7 @@ class RelayHub:
 
         return False
 
-    async def _handle_anchor_hello(self, socket: WebSocket, role: str, msg: dict[str, Any]) -> bool:
+    async def _handle_anchor_hello(self, socket: WebSocket, role: str, user_id: str, msg: dict[str, Any]) -> bool:
         if role != "anchor" or msg.get("type") != "anchor.hello":
             return False
 
@@ -154,16 +181,20 @@ class RelayHub:
             connected_at=msg.get("ts") if isinstance(msg.get("ts"), str) else datetime.now(tz=timezone.utc).isoformat(),
         )
 
+        replaced: WebSocket | None = None
+        notifications: list[BroadcastNotification] = []
         async with self._lock:
-            existing = self.anchor_id_to_socket.get(anchor_id)
+            existing = self.anchor_id_to_socket.get((user_id, anchor_id))
             if existing and existing is not socket:
-                await self._remove_socket_locked(existing, "anchor")
+                notifications.extend(self._remove_socket_locked(existing, "anchor"))
                 replaced = existing
 
             self.anchor_meta[socket] = meta
-            self.anchor_id_to_socket[anchor_id] = socket
+            self.anchor_id_to_socket[(user_id, anchor_id)] = socket
             self.socket_to_anchor_id[socket] = anchor_id
-            clients = list(self.client_sockets.keys())
+            clients = list(self.user_to_client_sockets.get(user_id, set()))
+
+        await self._flush_notifications(notifications)
 
         if replaced:
             try:
@@ -187,6 +218,7 @@ class RelayHub:
         self,
         socket: WebSocket,
         role: str,
+        user_id: str,
         raw_data: str,
         msg: dict[str, Any] | None,
     ) -> None:
@@ -205,11 +237,11 @@ class RelayHub:
                     return
 
             async with self._lock:
-                target_socket, failure = self._resolve_client_target_locked(thread_id, anchor_id)
+                target_socket, failure = self._resolve_client_target_locked(user_id, thread_id, anchor_id)
                 if target_socket and thread_id:
                     resolved_anchor_id = self.socket_to_anchor_id.get(target_socket)
                     if resolved_anchor_id:
-                        self.thread_to_anchor_id[thread_id] = resolved_anchor_id
+                        self.thread_to_anchor_id[self._thread_key(user_id, thread_id)] = resolved_anchor_id
 
                 if target_socket and request_key and has_method:
                     self.pending_client_requests[(target_socket, request_key)] = socket
@@ -226,7 +258,7 @@ class RelayHub:
             async with self._lock:
                 anchor_source_id = self.socket_to_anchor_id.get(socket)
                 if thread_id and anchor_source_id:
-                    self.thread_to_anchor_id[thread_id] = anchor_source_id
+                    self.thread_to_anchor_id[self._thread_key(user_id, thread_id)] = anchor_source_id
                 response_target = self.pending_client_requests.pop((socket, request_key), None)
             if response_target:
                 await self._send_raw(response_target, raw_data)
@@ -235,15 +267,15 @@ class RelayHub:
         async with self._lock:
             anchor_source_id = self.socket_to_anchor_id.get(socket)
             if thread_id and anchor_source_id:
-                self.thread_to_anchor_id[thread_id] = anchor_source_id
+                self.thread_to_anchor_id[self._thread_key(user_id, thread_id)] = anchor_source_id
 
             if thread_id:
-                targets_set = self.thread_to_clients.get(thread_id)
+                targets_set = self.thread_to_clients.get(self._thread_key(user_id, thread_id))
                 targets = list(targets_set) if targets_set else []
                 if not targets:
-                    targets = list(self.client_sockets.keys())
+                    targets = list(self.user_to_client_sockets.get(user_id, set()))
             else:
-                targets = list(self.client_sockets.keys())
+                targets = list(self.user_to_client_sockets.get(user_id, set()))
 
             if request_key and has_method:
                 for target in targets:
@@ -253,34 +285,35 @@ class RelayHub:
 
     def _resolve_client_target_locked(
         self,
+        user_id: str,
         thread_id: str | None,
         anchor_id: str | None,
     ) -> tuple[WebSocket | None, RouteFailure | None]:
         if anchor_id:
-            target = self.anchor_id_to_socket.get(anchor_id)
+            target = self.anchor_id_to_socket.get((user_id, anchor_id))
             if not target:
                 return None, RouteFailure(code="anchor_not_found", message="Selected device is unavailable.")
             if thread_id:
-                bound_anchor = self.thread_to_anchor_id.get(thread_id)
+                bound_anchor = self.thread_to_anchor_id.get(self._thread_key(user_id, thread_id))
                 if bound_anchor and bound_anchor != anchor_id:
                     return None, RouteFailure(code="thread_anchor_mismatch", message="Thread is attached to another device.")
             return target, None
 
         if thread_id:
-            bound_anchor = self.thread_to_anchor_id.get(thread_id)
+            bound_anchor = self.thread_to_anchor_id.get(self._thread_key(user_id, thread_id))
             if bound_anchor:
-                target = self.anchor_id_to_socket.get(bound_anchor)
+                target = self.anchor_id_to_socket.get((user_id, bound_anchor))
                 if target:
                     return target, None
                 return None, RouteFailure(code="anchor_offline", message="Device for this thread is offline.")
 
-            subscribed = list(self.thread_to_anchors.get(thread_id, set()))
+            subscribed = list(self.thread_to_anchors.get(self._thread_key(user_id, thread_id), set()))
             if len(subscribed) == 1:
                 return subscribed[0], None
             if len(subscribed) > 1:
                 return None, RouteFailure(code="thread_anchor_mismatch", message="Thread is attached to multiple devices.")
 
-        anchors = list(self.anchor_sockets.keys())
+        anchors = list(self.user_to_anchor_sockets.get(user_id, set()))
         if len(anchors) == 1:
             return anchors[0], None
         if not anchors:
@@ -331,58 +364,97 @@ class RelayHub:
             return
         await asyncio.gather(*(self._send_raw(socket, raw_data) for socket in sockets), return_exceptions=True)
 
+    async def _flush_notifications(self, notifications: list[BroadcastNotification]) -> None:
+        for item in notifications:
+            await self._broadcast_json(item.sockets, item.payload)
+
     async def _send_raw(self, socket: WebSocket, raw_data: str) -> None:
         try:
             await socket.send_text(raw_data)
         except Exception:
             pass
 
-    def _subscribe_socket_locked(self, socket: WebSocket, role: str, thread_id: str) -> None:
+    def _thread_key(self, user_id: str, thread_id: str) -> tuple[str, str]:
+        return (user_id, thread_id)
+
+    def _subscribe_socket_locked(
+        self,
+        socket: WebSocket,
+        role: str,
+        thread_key: tuple[str, str],
+        thread_id: str,
+    ) -> None:
         socket_threads = self.client_sockets.get(socket) if role == "client" else self.anchor_sockets.get(socket)
         if socket_threads is not None:
             socket_threads.add(thread_id)
 
         thread_map = self.thread_to_clients if role == "client" else self.thread_to_anchors
-        thread_map.setdefault(thread_id, set()).add(socket)
+        thread_map.setdefault(thread_key, set()).add(socket)
 
-    def _unsubscribe_socket_locked(self, socket: WebSocket, role: str, thread_id: str) -> None:
+    def _unsubscribe_socket_locked(
+        self,
+        socket: WebSocket,
+        role: str,
+        thread_key: tuple[str, str],
+        thread_id: str,
+    ) -> None:
         socket_threads = self.client_sockets.get(socket) if role == "client" else self.anchor_sockets.get(socket)
         if socket_threads is not None:
             socket_threads.discard(thread_id)
 
         thread_map = self.thread_to_clients if role == "client" else self.thread_to_anchors
-        sockets = thread_map.get(thread_id)
+        sockets = thread_map.get(thread_key)
         if sockets:
             sockets.discard(socket)
             if not sockets:
-                thread_map.pop(thread_id, None)
+                thread_map.pop(thread_key, None)
 
-    async def _remove_socket_locked(self, socket: WebSocket, role: str) -> None:
+    def _remove_socket_locked(self, socket: WebSocket, role: str) -> list[BroadcastNotification]:
+        notifications: list[BroadcastNotification] = []
+        user_id = self.socket_to_user_id.pop(socket, None)
         source = self.client_sockets if role == "client" else self.anchor_sockets
+        by_user = self.user_to_client_sockets if role == "client" else self.user_to_anchor_sockets
         thread_map = self.thread_to_clients if role == "client" else self.thread_to_anchors
+
+        if user_id:
+            user_sockets = by_user.get(user_id)
+            if user_sockets:
+                user_sockets.discard(socket)
+                if not user_sockets:
+                    by_user.pop(user_id, None)
 
         threads = source.pop(socket, set())
         for thread_id in threads:
-            sockets = thread_map.get(thread_id)
+            if not user_id:
+                continue
+            thread_key = self._thread_key(user_id, thread_id)
+            sockets = thread_map.get(thread_key)
             if sockets:
                 sockets.discard(socket)
                 if not sockets:
-                    thread_map.pop(thread_id, None)
+                    thread_map.pop(thread_key, None)
 
         if role == "client":
             client_id = self.socket_to_client_id.pop(socket, None)
-            if client_id and self.client_id_to_socket.get(client_id) is socket:
-                self.client_id_to_socket.pop(client_id, None)
+            if client_id and user_id and self.client_id_to_socket.get((user_id, client_id)) is socket:
+                self.client_id_to_socket.pop((user_id, client_id), None)
         else:
             anchor_id = self.socket_to_anchor_id.pop(socket, None)
-            if anchor_id and self.anchor_id_to_socket.get(anchor_id) is socket:
-                self.anchor_id_to_socket.pop(anchor_id, None)
+            if anchor_id and user_id and self.anchor_id_to_socket.get((user_id, anchor_id)) is socket:
+                self.anchor_id_to_socket.pop((user_id, anchor_id), None)
+                stale_thread_keys = [
+                    thread_key
+                    for thread_key, bound_anchor_id in self.thread_to_anchor_id.items()
+                    if thread_key[0] == user_id and bound_anchor_id == anchor_id
+                ]
+                for thread_key in stale_thread_keys:
+                    self.thread_to_anchor_id.pop(thread_key, None)
 
             meta = self.anchor_meta.pop(socket, None)
-            if meta:
-                clients = list(self.client_sockets.keys())
+            if meta and user_id:
+                clients = list(self.user_to_client_sockets.get(user_id, set()))
                 payload = {"type": "orbit.anchor-disconnected", "anchorId": meta.id}
-                await self._broadcast_json(clients, payload)
+                notifications.append(BroadcastNotification(sockets=clients, payload=payload))
 
         stale_client_requests = [key for key, target in self.pending_client_requests.items() if key[0] is socket or target is socket]
         for key in stale_client_requests:
@@ -391,3 +463,5 @@ class RelayHub:
         stale_anchor_requests = [key for key, target in self.pending_anchor_requests.items() if key[0] is socket or target is socket]
         for key in stale_anchor_requests:
             self.pending_anchor_requests.pop(key, None)
+
+        return notifications
