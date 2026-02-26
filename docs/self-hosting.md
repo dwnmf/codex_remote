@@ -4,7 +4,7 @@ Zane can be fully self-hosted on your own Cloudflare account. The `zane self-hos
 
 ## Prerequisites
 
-- **macOS** with [Bun](https://bun.sh) and [Codex CLI](https://github.com/openai/codex) installed
+- **macOS/Linux/Windows** with [Bun](https://bun.sh) and [Codex CLI](https://github.com/openai/codex) installed
 - **A Cloudflare account** (the [free tier](https://www.cloudflare.com/plans/) is sufficient)
 - **Zane installed** via the [install script](installation.md)
 
@@ -31,7 +31,7 @@ zane self-host
 
 You can run this either:
 
-1. During `install.sh` when prompted, or
+1. During `install.sh` or `install.ps1` when prompted, or
 2. Later from your terminal with `zane self-host`.
 
 The wizard walks through 10 steps:

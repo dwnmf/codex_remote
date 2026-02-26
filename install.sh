@@ -98,10 +98,18 @@ printf "${BOLD}Zane Installer${RESET}\n"
 echo ""
 
 # ── Check OS ────────────────────────────────────
-if [[ "$(uname -s)" != "Darwin" ]]; then
-  abort "Zane currently only supports macOS. Linux and Windows support is coming soon."
-fi
-pass "macOS detected"
+case "$(uname -s)" in
+  Darwin)
+    platform_label="macOS"
+    ;;
+  Linux)
+    platform_label="Linux"
+    ;;
+  *)
+    abort "Unsupported OS: $(uname -s). Supported: macOS, Linux. Use install.ps1 on Windows."
+    ;;
+esac
+pass "$platform_label detected"
 
 # ── Check git ───────────────────────────────────
 step "Checking prerequisites..."
@@ -109,9 +117,14 @@ step "Checking prerequisites..."
 if command -v git &>/dev/null; then
   pass "git installed"
 else
-  warn "git not found. Installing Xcode Command Line Tools..."
-  xcode-select --install 2>/dev/null || true
-  echo "   Please complete the Xcode CLT installation and re-run this script."
+  if [[ "$platform_label" == "macOS" ]]; then
+    warn "git not found. Installing Xcode Command Line Tools..."
+    xcode-select --install 2>/dev/null || true
+    echo "   Please complete the Xcode CLT installation and re-run this script."
+  else
+    echo "   Please install git with your package manager and re-run this script."
+    echo "   Example: sudo apt-get update && sudo apt-get install -y git"
+  fi
   exit 1
 fi
 
@@ -257,12 +270,12 @@ for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
   fi
 done
 
-# If neither rc file existed, create .zshrc (macOS default shell)
+# If neither rc file existed, create .profile (portable default)
 if [[ -z "$added_to" ]]; then
-  echo "" >> "$HOME/.zshrc"
-  echo "# Zane" >> "$HOME/.zshrc"
-  echo "$path_line" >> "$HOME/.zshrc"
-  added_to=" .zshrc"
+  echo "" >> "$HOME/.profile"
+  echo "# Zane" >> "$HOME/.profile"
+  echo "$path_line" >> "$HOME/.profile"
+  added_to=" .profile"
 fi
 
 # Make it available in the current shell
@@ -297,5 +310,9 @@ printf "    ${BOLD}zane config${RESET}   Edit configuration\n"
 printf "    ${BOLD}zane help${RESET}     See all commands\n"
 echo ""
 echo "  You may need to restart your terminal or run:"
-echo "    source ~/.zshrc"
+if [[ "$platform_label" == "macOS" ]]; then
+  echo "    source ~/.zshrc"
+else
+  echo "    source ~/.profile"
+fi
 echo ""

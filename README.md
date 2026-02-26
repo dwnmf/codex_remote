@@ -40,15 +40,23 @@ Zane lets you monitor and control [Codex CLI](https://github.com/openai/codex) s
 
 ### Requirements
 
-- macOS (Apple Silicon or Intel) for installer-based flow (`install.sh` / `zane self-host`)
-- Linux/Windows are supported in source-run mode with Anchor + FastAPI control-plane
+- macOS or Linux for `install.sh`
+- Windows for `install.ps1`
 - [Bun](https://bun.sh) runtime
 - [Codex CLI](https://github.com/openai/codex) installed and authenticated
 
 ### Install
 
+macOS / Linux:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cospec-ai/zane/main/install.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/cospec-ai/zane/main/install.ps1 | iex
 ```
 
 The installer now prompts whether to run self-host deployment immediately or skip and run it later.

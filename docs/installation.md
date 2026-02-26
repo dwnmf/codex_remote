@@ -1,21 +1,28 @@
 # Installing Zane
 
-Zane runs a local Anchor service on your Mac that connects to Orbit (the hosted control plane) so you can supervise Codex sessions remotely.
+Zane runs a local Anchor service on your machine that connects to Orbit (the hosted control plane) so you can supervise Codex sessions remotely.
 
 ## Requirements
 
-- macOS (Apple Silicon or Intel) for the installer flow
+- macOS or Linux for the `install.sh` flow
+- Windows for the `install.ps1` flow
 - [Bun](https://bun.sh) runtime
 - [Codex CLI](https://github.com/openai/codex) installed
 
-For Linux/Windows and a lighter backend, use the FastAPI guide: [FastAPI Control Plane](fastapi-control-plane.md).
+For a lighter backend alternative, see: [FastAPI Control Plane](fastapi-control-plane.md).
 
 ## Install
 
-Run the install script:
+macOS / Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cospec-ai/zane/main/install.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/cospec-ai/zane/main/install.ps1 | iex
 ```
 
 This clones the repo to `~/.zane`, installs Anchor dependencies, adds `zane` to your PATH, and prompts whether to run `zane self-host` immediately.

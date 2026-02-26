@@ -44,6 +44,29 @@ retry_cmd() {
   return 1
 }
 
+update_database_id_toml() {
+  local toml_path="$1"
+  local db_id="$2"
+  local tmp
+
+  tmp="$(mktemp "${toml_path}.tmp.XXXXXX")" || return 1
+  awk -v replacement="$db_id" '
+    BEGIN { updated = 0 }
+    /^database_id[[:space:]]*=[[:space:]]*"/ {
+      print "database_id = \"" replacement "\""
+      updated = 1
+      next
+    }
+    { print }
+    END { if (updated == 0) exit 1 }
+  ' "$toml_path" > "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+
+  mv "$tmp" "$toml_path"
+}
+
 resolve_origin_branch() {
   local repo="$1"
   local remote_head
@@ -247,7 +270,8 @@ cmd_update() {
     if [[ -n "$db_id" ]]; then
       for toml_path in "$ZANE_HOME/wrangler.toml" "$ZANE_HOME/services/orbit/wrangler.toml"; do
         if [[ -f "$toml_path" ]]; then
-          sed -i '' "s/database_id = \"[^\"]*\"/database_id = \"$db_id\"/" "$toml_path"
+          update_database_id_toml "$toml_path" "$db_id" \
+            || { echo "Error: Failed to update database_id in $toml_path"; exit 1; }
         fi
       done
     fi
@@ -329,8 +353,8 @@ cmd_uninstall() {
   # Clean PATH from shell rc files
   local rc_files=("$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile")
   for rc in "${rc_files[@]}"; do
-    if [[ -f "$rc" ]] && grep -q 'ZANE_HOME' "$rc"; then
-      sed -i '' '/ZANE_HOME/d' "$rc"
+    if [[ -f "$rc" ]] && grep -q 'zane/bin' "$rc"; then
+      awk '!/zane\/bin/' "$rc" > "$rc.tmp" && mv "$rc.tmp" "$rc"
       echo "Cleaned $rc"
     fi
   done

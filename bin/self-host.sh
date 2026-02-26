@@ -175,6 +175,29 @@ normalize_pages_url() {
   printf "%s" "$url"
 }
 
+update_database_id_toml() {
+  local toml_path="$1"
+  local db_id="$2"
+  local tmp
+
+  tmp="$(mktemp "${toml_path}.tmp.XXXXXX")" || return 1
+  awk -v replacement="$db_id" '
+    BEGIN { updated = 0 }
+    /^database_id[[:space:]]*=[[:space:]]*"/ {
+      print "database_id = \"" replacement "\""
+      updated = 1
+      next
+    }
+    { print }
+    END { if (updated == 0) exit 1 }
+  ' "$toml_path" > "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+
+  mv "$tmp" "$toml_path"
+}
+
 generate_vapid_keys() {
   bun --silent -e '
     const keyPair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
@@ -344,7 +367,8 @@ step "3. Updating wrangler.toml configurations"
 for toml_path in \
   "$ZANE_HOME/wrangler.toml" \
   "$ZANE_HOME/services/orbit/wrangler.toml"; do
-  sed -i '' "s/database_id = \"[^\"]*\"/database_id = \"$database_id\"/" "$toml_path"
+  update_database_id_toml "$toml_path" "$database_id" \
+    || abort "Failed to update database_id in $toml_path"
   pass "Updated $(basename "$(dirname "$toml_path")")/wrangler.toml"
 done
 
