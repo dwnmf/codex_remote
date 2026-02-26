@@ -4,5 +4,5 @@ pages_build_output_dir = "dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "zane"
-database_id = "ca5a5a6b-6822-4246-8fc2-136ed5b1c6a0"
+database_id = "7842cb67-ccd1-4fb2-b41d-636fa13976ad"
 migrations_dir = "migrations"

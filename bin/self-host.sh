@@ -103,17 +103,31 @@ prompt_for_required_url() {
   done
 }
 
+output_has_wrangler_error() {
+  local raw="$1"
+  echo "$raw" | grep -Eq '^[[:space:]]*X[[:space:]]+\[?ERROR\]?'
+}
+
 put_orbit_secret() {
   local name="$1"
   local value="$2"
+  local out status
 
   # Wrangler v4 versioned workflow
-  if printf "%s" "$value" | (cd "$ZANE_HOME/services/orbit" && wrangler versions secret put "$name"); then
+  out=$(printf "%s" "$value" | (cd "$ZANE_HOME/services/orbit" && wrangler versions secret put "$name") 2>&1)
+  status=$?
+  if [[ $status -eq 0 ]] && ! output_has_wrangler_error "$out"; then
     return 0
   fi
 
   # Fallback for older Wrangler behavior
-  printf "%s" "$value" | (cd "$ZANE_HOME/services/orbit" && wrangler secret put "$name")
+  out=$(printf "%s" "$value" | (cd "$ZANE_HOME/services/orbit" && wrangler secret put "$name") 2>&1)
+  status=$?
+  if [[ $status -ne 0 ]] || output_has_wrangler_error "$out"; then
+    echo "$out"
+    return 1
+  fi
+  return 0
 }
 
 deploy_orbit() {
@@ -238,7 +252,7 @@ install_web_deps() {
 build_web() {
   local auth_url="$1"
   local public_key="$2"
-  (cd "$ZANE_HOME" && AUTH_URL="$auth_url" VAPID_PUBLIC_KEY="$public_key" bun run build)
+  (cd "$ZANE_HOME" && AUTH_URL="$auth_url" AUTH_MODE="passkey" VAPID_PUBLIC_KEY="$public_key" bun run build)
 }
 
 create_pages_project() {
@@ -411,6 +425,9 @@ if ! retry_capture 3 5 "Orbit deploy" deploy_orbit; then
 fi
 orbit_output="$RETRY_LAST_OUTPUT"
 echo "$orbit_output"
+if output_has_wrangler_error "$orbit_output"; then
+  abort "Orbit deploy returned Cloudflare API errors."
+fi
 
 set_orbit_secret "ZANE_WEB_JWT_SECRET" "$web_jwt_secret"
 set_orbit_secret "ZANE_ANCHOR_JWT_SECRET" "$anchor_jwt_secret"
@@ -502,6 +519,7 @@ cat > "$tmp_env_file" <<ENVEOF
 ANCHOR_PORT=8788
 ANCHOR_ORBIT_URL=${orbit_ws_url}
 AUTH_URL=${orbit_url}
+AUTH_MODE=passkey
 VAPID_PUBLIC_KEY=${vapid_public_key}
 ANCHOR_JWT_TTL_SEC=300
 ANCHOR_APP_CWD=

@@ -3,7 +3,17 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$script:ZaneHome = if ($env:ZANE_HOME) { $env:ZANE_HOME } else { Join-Path $HOME ".zane" }
+$script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$script:RepoRoot = Split-Path -Parent $script:ScriptDir
+$script:ZaneHome = if ($env:ZANE_HOME) {
+  $env:ZANE_HOME
+}
+elseif (Test-Path (Join-Path $script:RepoRoot "services/orbit")) {
+  $script:RepoRoot
+}
+else {
+  Join-Path $HOME ".zane"
+}
 $script:EnvFile = Join-Path $script:ZaneHome ".env"
 $script:OrbitDir = Join-Path $script:ZaneHome "services/orbit"
 $script:RootWranglerToml = Join-Path $script:ZaneHome "wrangler.toml"
@@ -97,6 +107,11 @@ function Extract-Url([string]$Text, [string]$Pattern) {
   return ""
 }
 
+function Has-WranglerErrorOutput([string]$Output) {
+  if (-not $Output) { return $false }
+  return [regex]::IsMatch($Output, "(?m)^\s*X\s+\[?ERROR\]?")
+}
+
 function Normalize-PagesUrl([string]$Url) {
   if (-not $Url) { return $Url }
   try {
@@ -115,11 +130,14 @@ function Normalize-PagesUrl([string]$Url) {
 
 function Update-DatabaseIdToml([string]$TomlPath, [string]$DatabaseId) {
   $content = Get-Content $TomlPath -Raw
-  $updated = [regex]::Replace($content, 'database_id\s*=\s*"[^"]*"', "database_id = `"$DatabaseId`"", 1)
-  if ($updated -eq $content) {
+  $pattern = 'database_id\s*=\s*"[^"]*"'
+  if (-not [regex]::IsMatch($content, $pattern)) {
     Abort "Failed to update database_id in $TomlPath"
   }
-  Set-Content -Path $TomlPath -Value $updated -NoNewline
+  $updated = [regex]::Replace($content, $pattern, "database_id = `"$DatabaseId`"", 1)
+  if ($updated -ne $content) {
+    Set-Content -Path $TomlPath -Value $updated -NoNewline
+  }
 }
 
 function Generate-VapidKeys() {
@@ -212,21 +230,25 @@ function Set-OrbitSecret([string]$Name, [string]$Value) {
   Push-Location $script:OrbitDir
   try {
     $ok = $false
-    try {
-      $Value | wrangler versions secret put $Name | Out-Null
-      if ($LASTEXITCODE -eq 0) {
-        $ok = $true
+    $lastOut = ""
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+      try {
+        $lastOut = ($Value | wrangler versions secret put $Name 2>&1 | Out-String)
+        if ($LASTEXITCODE -eq 0 -and -not (Has-WranglerErrorOutput $lastOut)) {
+          $ok = $true
+          break
+        }
+      }
+      catch {
+        $lastOut = $_.Exception.Message
+      }
+      if ($attempt -lt 3) {
+        Write-WarnLine "Setting secret $Name failed (attempt $attempt/3); retrying in 2s..."
+        Start-Sleep -Seconds 2
       }
     }
-    catch {
-      $ok = $false
-    }
-
     if (-not $ok) {
-      $Value | wrangler secret put $Name | Out-Null
-      if ($LASTEXITCODE -ne 0) {
-        Abort "Failed to set orbit secret: $Name"
-      }
+      Abort "Failed to set orbit secret: $Name`n$lastOut"
     }
   }
   finally {
@@ -240,7 +262,7 @@ function Deploy-Orbit() {
   Push-Location $script:OrbitDir
   try {
     $output = (& wrangler deploy 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0) {
+    if ($LASTEXITCODE -ne 0 -or (Has-WranglerErrorOutput $output)) {
       Abort "Orbit deploy failed.`n$output"
     }
     return $output
@@ -354,7 +376,7 @@ finally {
   Pop-Location
 }
 
-Invoke-WithEnv @{ AUTH_URL = $orbitUrl; VAPID_PUBLIC_KEY = $vapid.Public } {
+Invoke-WithEnv @{ AUTH_URL = $orbitUrl; VAPID_PUBLIC_KEY = $vapid.Public; AUTH_MODE = "passkey" } {
   Push-Location $script:ZaneHome
   try {
     & bun run build
@@ -430,6 +452,7 @@ $envContent = @(
   "ANCHOR_PORT=8788"
   "ANCHOR_ORBIT_URL=$orbitWsUrl"
   "AUTH_URL=$orbitUrl"
+  "AUTH_MODE=passkey"
   "VAPID_PUBLIC_KEY=$($vapid.Public)"
   "ANCHOR_JWT_TTL_SEC=300"
   "ANCHOR_APP_CWD="

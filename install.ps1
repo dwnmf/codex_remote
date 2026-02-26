@@ -79,6 +79,22 @@ function Ensure-EnvFile([string]$HomePath) {
   Write-WarnLine ".env.example not found; created a minimal .env file."
 }
 
+function Update-DatabaseIdToml([string]$TomlPath, [string]$DatabaseId) {
+  if (-not (Test-Path $TomlPath)) {
+    return
+  }
+
+  $content = Get-Content $TomlPath -Raw
+  $pattern = 'database_id\s*=\s*"[^"]*"'
+  if (-not [regex]::IsMatch($content, $pattern)) {
+    throw "Failed to update database_id in $TomlPath"
+  }
+  $updated = [regex]::Replace($content, $pattern, "database_id = `"$DatabaseId`"", 1)
+  if ($updated -ne $content) {
+    Set-Content -Path $TomlPath -Value $updated -NoNewline
+  }
+}
+
 function Ensure-Path([string]$TargetDir) {
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
   $parts = @()

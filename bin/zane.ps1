@@ -48,11 +48,14 @@ function Update-DatabaseIdToml([string]$TomlPath, [string]$DatabaseId) {
   }
 
   $content = Get-Content $TomlPath -Raw
-  $updated = [regex]::Replace($content, 'database_id\s*=\s*"[^"]*"', "database_id = `"$DatabaseId`"", 1)
-  if ($updated -eq $content) {
+  $pattern = 'database_id\s*=\s*"[^"]*"'
+  if (-not [regex]::IsMatch($content, $pattern)) {
     throw "Failed to update database_id in $TomlPath"
   }
-  Set-Content -Path $TomlPath -Value $updated -NoNewline
+  $updated = [regex]::Replace($content, $pattern, "database_id = `"$DatabaseId`"", 1)
+  if ($updated -ne $content) {
+    Set-Content -Path $TomlPath -Value $updated -NoNewline
+  }
 }
 
 function Invoke-Retry([int]$Attempts, [int]$DelaySeconds, [string]$Description, [scriptblock]$Action) {
@@ -360,6 +363,8 @@ function Cmd-SelfHost() {
   if (-not (Test-Path $scriptPath)) {
     throw "self-host wizard not found at $scriptPath"
   }
+  # Ensure self-host script uses the same resolved home as this CLI invocation.
+  $env:ZANE_HOME = $script:ZaneHome
   & $scriptPath
   exit $LASTEXITCODE
 }
