@@ -81,6 +81,26 @@ wrangler_tty() {
   fi
 }
 
+ensure_cloudflare_auth() {
+  if retry_capture 2 2 "Cloudflare whoami" wrangler_tty whoami; then
+    pass "Cloudflare authenticated"
+    return 0
+  fi
+
+  warn "Not logged in to Cloudflare"
+  echo "$RETRY_LAST_OUTPUT"
+  echo "  Running 'wrangler login'..."
+
+  wrangler_tty login || abort "Cloudflare login failed."
+
+  if ! retry_capture 2 2 "Cloudflare whoami" wrangler_tty whoami; then
+    echo "$RETRY_LAST_OUTPUT"
+    abort "Cloudflare authentication failed after login."
+  fi
+
+  pass "Cloudflare authenticated"
+}
+
 is_https_url() {
   local value="$1"
   [[ "$value" =~ ^https://[^[:space:]]+$ ]]
@@ -293,22 +313,7 @@ else
   fi
 fi
 
-if retry_capture 2 2 "Cloudflare whoami" wrangler_tty whoami; then
-  pass "Cloudflare authenticated"
-else
-  warn "Not logged in to Cloudflare"
-  echo "$RETRY_LAST_OUTPUT"
-  if confirm "  Run 'wrangler login' now?"; then
-    wrangler_tty login
-    retry_capture 2 2 "Cloudflare whoami" wrangler_tty whoami || {
-      echo "$RETRY_LAST_OUTPUT"
-      abort "Cloudflare authentication failed."
-    }
-    pass "Cloudflare authenticated"
-  else
-    abort "Cloudflare login required. Run: wrangler login"
-  fi
-fi
+ensure_cloudflare_auth
 
 # ── Create D1 Database ──────────────────────────
 step "2. Creating D1 database"
@@ -320,15 +325,11 @@ echo "  Checking for existing database..."
 if ! retry_capture 3 3 "Listing D1 databases" list_d1_databases; then
   warn "Failed to list D1 databases."
   echo "$RETRY_LAST_OUTPUT"
-  if confirm "  Run 'wrangler login' now?"; then
-    wrangler_tty login
-    retry_capture 3 3 "Listing D1 databases" list_d1_databases || {
-      echo "$RETRY_LAST_OUTPUT"
-      abort "Could not list D1 databases."
-    }
-  else
-    abort "Cloudflare login required to list D1 databases."
-  fi
+  ensure_cloudflare_auth
+  retry_capture 3 3 "Listing D1 databases" list_d1_databases || {
+    echo "$RETRY_LAST_OUTPUT"
+    abort "Could not list D1 databases."
+  }
 fi
 db_list="$RETRY_LAST_OUTPUT"
 
@@ -340,15 +341,11 @@ else
   if ! retry_capture 3 3 "Creating D1 database" create_d1_database; then
     warn "Failed to create D1 database 'zane'."
     echo "$RETRY_LAST_OUTPUT"
-    if confirm "  Run 'wrangler login' now?"; then
-      wrangler_tty login
-      retry_capture 3 3 "Creating D1 database" create_d1_database || {
-        echo "$RETRY_LAST_OUTPUT"
-        abort "Could not create D1 database 'zane'."
-      }
-    else
+    ensure_cloudflare_auth
+    retry_capture 3 3 "Creating D1 database" create_d1_database || {
+      echo "$RETRY_LAST_OUTPUT"
       abort "Could not create D1 database 'zane'."
-    fi
+    }
   fi
 
   db_output="$RETRY_LAST_OUTPUT"

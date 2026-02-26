@@ -67,6 +67,28 @@ function Invoke-Retry([int]$Attempts, [int]$DelaySeconds, [string]$Description, 
   }
 }
 
+function Ensure-CloudflareAuth() {
+  & wrangler whoami | Out-Null
+  if ($LASTEXITCODE -eq 0) {
+    Write-Pass "Cloudflare authenticated"
+    return
+  }
+
+  Write-WarnLine "Not logged in to Cloudflare"
+  Write-Host "  Running 'wrangler login'..."
+  & wrangler login
+  if ($LASTEXITCODE -ne 0) {
+    Abort "Cloudflare login failed."
+  }
+
+  & wrangler whoami | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Abort "Cloudflare authentication failed after login."
+  }
+
+  Write-Pass "Cloudflare authenticated"
+}
+
 function Invoke-WithEnv([hashtable]$Vars, [scriptblock]$Action) {
   $previous = @{}
   foreach ($key in $Vars.Keys) {
@@ -294,20 +316,7 @@ if (-not (Test-Tool "wrangler")) {
 }
 Write-Pass "wrangler installed"
 
-& wrangler whoami | Out-Null
-if ($LASTEXITCODE -ne 0) {
-  Write-WarnLine "Not logged in to Cloudflare"
-  if (Confirm-Yes "Run 'wrangler login' now?") {
-    & wrangler login
-    if ($LASTEXITCODE -ne 0) {
-      Abort "Cloudflare login failed."
-    }
-  }
-  else {
-    Abort "Cloudflare login required."
-  }
-}
-Write-Pass "Cloudflare authenticated"
+Ensure-CloudflareAuth
 
 Write-Step "2. Creating D1 database"
 $databaseId = Invoke-Retry 1 0 "D1 setup" { Get-OrCreateDatabaseId }
