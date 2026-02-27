@@ -213,8 +213,12 @@ function Invoke-Anchor([bool]$ForceLogin) {
 
   $previous["CODEX_REMOTE_CREDENTIALS_FILE"] = [Environment]::GetEnvironmentVariable("CODEX_REMOTE_CREDENTIALS_FILE", "Process")
   $previous["CODEX_REMOTE_FORCE_LOGIN"] = [Environment]::GetEnvironmentVariable("CODEX_REMOTE_FORCE_LOGIN", "Process")
+  $forceLoginValue = ""
+  if ($ForceLogin) {
+    $forceLoginValue = "1"
+  }
   [Environment]::SetEnvironmentVariable("CODEX_REMOTE_CREDENTIALS_FILE", $script:CredentialsFile, "Process")
-  [Environment]::SetEnvironmentVariable("CODEX_REMOTE_FORCE_LOGIN", (if ($ForceLogin) { "1" } else { "" }), "Process")
+  [Environment]::SetEnvironmentVariable("CODEX_REMOTE_FORCE_LOGIN", $forceLoginValue, "Process")
 
   $exitCode = 0
   try {
