@@ -1,10 +1,7 @@
 <script lang="ts">
     import type { Snippet } from "svelte";
     import type { ConnectionStatus, SandboxMode } from "../types";
-    import { socket } from "../socket.svelte";
-    import { connectionManager } from "../connection-manager.svelte";
     import { anchors } from "../anchors.svelte";
-    import ShimmerDot from "./ShimmerDot.svelte";
 
     interface Props {
         status: ConnectionStatus;
@@ -19,23 +16,13 @@
     let sandboxOpen = $state(false);
     let mobileMenuOpen = $state(false);
 
-    const statusConfig: Record<ConnectionStatus, { icon: string; color: string; label: string }> = {
-        connected: { icon: "●", color: "var(--cli-success)", label: "connected" },
-        connecting: { icon: "○", color: "var(--cli-text-dim)", label: "connecting" },
-        reconnecting: { icon: "◐", color: "var(--cli-warning)", label: "reconnecting" },
-        disconnected: { icon: "○", color: "var(--cli-text-dim)", label: "disconnected" },
-        error: { icon: "✗", color: "var(--cli-error)", label: "error" },
-    };
-
     const sandboxOptions: { value: SandboxMode; label: string }[] = [
         { value: "read-only", label: "Read Only" },
         { value: "workspace-write", label: "Workspace" },
         { value: "danger-full-access", label: "Full Access" },
     ];
 
-    const statusMeta = $derived(statusConfig[status]);
     const selectedSandbox = $derived(sandboxOptions.find((s) => s.value === sandbox) || sandboxOptions[1]);
-    const canReconnect = $derived(status === "error" || status === "disconnected");
     const showAnchorAlert = $derived(status === "connected" && anchors.status === "none");
 
     function handleClickOutside(e: MouseEvent) {
@@ -48,20 +35,6 @@
         }
     }
 
-    function handleStatusClick() {
-        if (canReconnect) {
-            connectionManager.requestConnect();
-        }
-    }
-
-    function getStatusTitle(): string {
-        if (status === "connected") return "Connected";
-        if (status === "connecting") return "Connecting...";
-        if (status === "reconnecting") return "Reconnecting...";
-        if (status === "error" && socket.error) return `Error: ${socket.error}. Click to reconnect`;
-        if (status === "disconnected") return "Disconnected. Click to connect";
-        return "Connection status";
-    }
 </script>
 
 <svelte:window onclick={handleClickOutside} />
@@ -72,21 +45,6 @@
             <span class="brand-main">CODEX</span>
             <span class="brand-accent">Remote</span>
         </a>
-        <span class="separator">·</span>
-        <button
-            type="button"
-            class="status-btn row"
-            class:clickable={canReconnect}
-            onclick={handleStatusClick}
-            title={getStatusTitle()}
-            disabled={!canReconnect}
-        >
-            {#if status === "connecting" || status === "reconnecting"}
-                <ShimmerDot color={statusMeta.color} />
-            {:else}
-                <span class="status-icon" style:color={statusMeta.color}>{statusMeta.icon}</span>
-            {/if}
-        </button>
 
         {#if threadId}
             <span class="separator">·</span>
@@ -232,39 +190,33 @@
         color: var(--cli-text-muted);
     }
 
-    .status-icon {
-        line-height: 1;
-    }
-
-    .status-btn {
-        --row-gap: 0;
-        padding: 0;
-        background: transparent;
-        border: none;
-        cursor: default;
-    }
-
-    .status-btn.clickable {
-        cursor: pointer;
-    }
-
     .anchor-alert {
-        padding: 0.1rem 0.42rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        white-space: nowrap;
+        padding: 0.24rem 0.66rem;
         border-radius: var(--radius-md);
-        border: 1px solid var(--cli-warning);
-        color: var(--cli-warning);
+        border: 1px solid transparent;
+        background: var(--color-btn-primary-bg);
         font-size: var(--text-xs);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.045em;
         line-height: 1.4;
+        color: var(--color-btn-primary-text);
+        font-family: var(--font-mono);
+        font-weight: 700;
+        transition: opacity var(--transition-fast);
     }
 
     .anchor-alert-link {
+        display: inline-block;
         text-decoration: none;
+        color: var(--color-btn-primary-text);
     }
 
     .anchor-alert-link:hover {
-        background: color-mix(in srgb, var(--cli-warning) 12%, transparent);
+        opacity: 0.86;
     }
 
     .thread-id {

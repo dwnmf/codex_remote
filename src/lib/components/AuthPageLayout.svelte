@@ -32,9 +32,9 @@
     </div>
 
     <div class="login-right">
-      <div class="login-visual">
-        <div class="visual-head">
-          <span class="visual-watermark">Access</span>
+        <div class="login-visual">
+          <div class="visual-head">
+          <span class="visual-watermark">ACCESS</span>
         </div>
         <div class="visual-text">
           <span class="visual-label">Remote control for your local Codex.</span>
@@ -183,18 +183,33 @@
     overflow: hidden;
   }
 
+  :global(:root[data-theme="light"]) .login-shell {
+    border-color: color-mix(in srgb, var(--cli-border) 62%, transparent);
+    box-shadow: var(--shadow-md);
+  }
+
+  :global(:root[data-theme="light"]) .login-visual {
+    border-left-color: color-mix(in srgb, var(--cli-border) 40%, transparent);
+    background:
+      linear-gradient(
+        160deg,
+        #ebe6dc,
+        color-mix(in srgb, var(--cli-bg) 88%, transparent)
+      );
+  }
+
   .visual-head {
     display: grid;
-    gap: 0.8rem;
+    gap: 0.42rem;
     max-width: 30rem;
   }
 
   .visual-watermark {
     position: relative;
     font-family: var(--font-display);
-    font-size: clamp(3.6rem, 10vw, 7rem);
-    line-height: 0.84;
-    letter-spacing: -0.008em;
+    font-size: clamp(3.4rem, 8.8vw, 6.4rem);
+    line-height: 0.82;
+    letter-spacing: -0.012em;
     text-transform: uppercase;
     color: color-mix(in srgb, var(--cli-text) 88%, transparent);
     pointer-events: none;
@@ -210,14 +225,15 @@
     margin-top: auto;
     margin-bottom: clamp(0.7rem, 2vh, 1.5rem);
     padding-top: clamp(0.6rem, 1.2vh, 1rem);
+    border-top: 1px solid color-mix(in srgb, var(--cli-border) 34%, transparent);
   }
 
   .visual-label {
-    font-size: clamp(1.35rem, 2.1vw, 1.9rem);
+    font-size: clamp(1.32rem, 2vw, 1.76rem);
     font-family: var(--font-editorial);
-    font-weight: 400;
+    font-weight: 500;
     font-style: italic;
-    line-height: 1.08;
+    line-height: 1.1;
     letter-spacing: -0.004em;
     max-width: 18ch;
   }

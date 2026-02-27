@@ -86,7 +86,8 @@
             <path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4Z" />
             <circle cx="12" cy="14" r="2" />
           </svg>
-          <span class="collapsible-label">{currentModelLabel}</span>
+          <span class="tool-key">Model</span>
+          <span class="tool-value collapsible-label">{currentModelLabel}</span>
           <svg class="chevron collapsible-label" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="m6 9 6 6 6-6" />
           </svg>
@@ -163,40 +164,61 @@
   <svg class="chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
   </svg>
-  <span>{worktreeDisplay}</span>
+  <span class="tool-key">Project</span>
+  <span class="tool-value">{worktreeDisplay}</span>
 </button>
 
 <style>
   .input-card {
     --stack-gap: 0;
     width: 100%;
-    border: 1px solid var(--cli-border);
+    position: relative;
+    border: 1px solid color-mix(in srgb, var(--cli-border) 70%, transparent);
     border-radius: var(--radius-lg);
-    background: var(--cli-bg);
-    box-shadow: none;
+    background: color-mix(in srgb, var(--cli-bg-elevated) 86%, var(--cli-bg));
+    box-shadow: var(--shadow-sm);
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+
+  .input-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--cli-bg-elevated) 46%, transparent),
+        transparent 56%
+      );
+    opacity: 0.5;
   }
 
   .input-card:focus-within {
     border-color: var(--cli-prefix-agent);
-    box-shadow: var(--shadow-focus);
+    box-shadow:
+      var(--shadow-focus),
+      var(--shadow-sm);
   }
 
   .input-card textarea {
     flex: 1;
     display: block;
     width: 100%;
-    padding: var(--space-md);
+    position: relative;
+    z-index: 1;
+    padding: 1rem 1.06rem 1.08rem;
     background: transparent;
     border: none;
     color: var(--cli-text);
-    font-family: var(--font-sans);
-    font-size: clamp(1.46rem, 3.5vw, 2.05rem);
-    font-weight: 700;
-    line-height: 1.5;
+    font-family: var(--font-editorial);
+    font-size: clamp(1.24rem, 2.8vw, 1.8rem);
+    font-weight: 420;
+    line-height: 1.34;
     resize: vertical;
-    min-height: 6.2rem;
-    letter-spacing: -0.022em;
+    min-height: 7.2rem;
+    letter-spacing: -0.01em;
   }
 
   .input-card textarea:focus {
@@ -207,7 +229,7 @@
     color: var(--cli-text-muted);
     font-family: var(--font-editorial);
     font-style: italic;
-    font-weight: 400;
+    font-weight: 360;
     letter-spacing: 0.003em;
   }
 
@@ -218,6 +240,8 @@
 
   .input-footer {
     --split-gap: var(--space-sm);
+    position: relative;
+    z-index: 1;
     padding: 0.58rem var(--space-md);
     border-top: 1px solid var(--cli-border);
   }
@@ -228,24 +252,24 @@
 
   .tool-btn {
     --row-gap: var(--space-xs);
-    padding: 0.3rem 0.52rem;
+    padding: 0.32rem 0.56rem;
     background: transparent;
-    border: 1px solid transparent;
+    border: 1px solid color-mix(in srgb, var(--cli-border) 52%, transparent);
     border-radius: var(--radius-md);
     color: var(--cli-text-dim);
-    font-family: var(--font-display);
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
-    font-weight: 500;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.045em;
+    letter-spacing: 0.04em;
     cursor: pointer;
     transition: all var(--transition-fast);
   }
 
   .tool-btn:hover {
-    background: color-mix(in srgb, var(--cli-bg-hover) 70%, transparent);
+    background: var(--cli-bg-hover);
     color: var(--cli-text);
-    border-color: transparent;
+    border-color: color-mix(in srgb, var(--cli-border) 72%, transparent);
   }
 
   .tool-btn svg {
@@ -260,9 +284,23 @@
     opacity: 0.5;
   }
 
+  .tool-key {
+    color: var(--cli-text-muted);
+    font-weight: 500;
+  }
+
+  .tool-value {
+    color: var(--cli-text);
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .mode-toggle.active {
-    background: color-mix(in srgb, var(--cli-prefix-agent) 15%, transparent);
-    color: var(--cli-prefix-agent);
+    background: color-mix(in srgb, var(--cli-text) 10%, transparent);
+    color: var(--cli-text);
+    border-color: color-mix(in srgb, var(--cli-text) 30%, var(--cli-border));
   }
 
   .submit-btn {
@@ -270,8 +308,8 @@
     width: 2.2rem;
     height: 2.2rem;
     padding: 0;
-    background: var(--cli-prefix-agent);
-    border: 1px solid transparent;
+    background: var(--color-btn-primary-bg);
+    border: 1px solid var(--cli-border);
     border-radius: var(--radius-md);
     cursor: pointer;
     transition: opacity var(--transition-fast);
@@ -281,7 +319,7 @@
   .submit-btn svg {
     width: 1rem;
     height: 1rem;
-    color: var(--cli-bg);
+    color: var(--color-btn-primary-text);
   }
 
   .submit-btn:hover:not(:disabled) {
@@ -289,7 +327,9 @@
   }
 
   .submit-btn:disabled {
-    opacity: 0.4;
+    opacity: 1;
+    background: color-mix(in srgb, var(--color-btn-primary-bg) 45%, var(--cli-bg-elevated));
+    border-color: color-mix(in srgb, var(--cli-border) 72%, transparent);
     cursor: not-allowed;
   }
 
@@ -300,29 +340,26 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-xs);
-    max-width: 16rem;
-    padding: 0.34rem 0.58rem;
-    border: 0;
+    max-width: min(100%, 26rem);
+    margin-top: 0.46rem;
+    padding: 0.34rem 0.6rem;
+    border: 1px solid color-mix(in srgb, var(--cli-border) 52%, transparent);
     border-radius: var(--radius-md);
     background: transparent;
     color: var(--cli-text-dim);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
-    font-weight: 500;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     cursor: pointer;
     transition: all var(--transition-fast);
-    border-bottom: 1px solid color-mix(in srgb, var(--cli-border) 55%, transparent);
-    border-top: 1px solid transparent;
-    border-left: 1px solid transparent;
-    border-right: 1px solid transparent;
   }
 
   .chip:hover {
     background: var(--cli-bg-hover);
     color: var(--cli-text);
-    border-bottom-color: var(--cli-text-muted);
+    border-color: color-mix(in srgb, var(--cli-border) 72%, transparent);
   }
 
   .chip-icon {
@@ -332,6 +369,7 @@
   }
 
   .chip span {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -366,7 +404,7 @@
     border: none;
     border-radius: var(--radius-md);
     color: var(--cli-text);
-    font-family: var(--font-sans);
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     font-weight: 600;
     letter-spacing: 0.01em;

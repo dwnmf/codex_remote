@@ -40,55 +40,35 @@
     </header>
 
     <main class="hero stack">
-      <div class="hero-grid">
-        <div class="hero-copy stack">
-          <h1>
-            <span class="hero-kicker">Remote coding control</span>
-            <span class="hero-word">REMOTE</span>
-            <span class="hero-caption"><span class="hero-script">Codex workflows</span> from any browser</span>
-          </h1>
-          <p>
-            Codex Remote lets you start and supervise Codex CLI sessions running on your machine from any browser.
-          </p>
-          {#if isLocalMode && !hasConfiguredUrl}
-            <div class="hero-actions row">
-              <a class="primary-btn" href="/settings">Configure Anchor URL</a>
-            </div>
-            <p class="local-mode-hint">Local mode active - no sign-in required</p>
-          {:else if isLocalMode && hasConfiguredUrl}
-            <div class="hero-actions row">
-              <a class="primary-btn" href="/app">Go to app</a>
-              <a class="ghost-btn" href="/settings">Settings</a>
-            </div>
-            <p class="local-mode-hint">Local mode active - no sign-in required</p>
-          {:else if !isSignedIn}
-            <div class="hero-actions row">
-              <a class="primary-btn" href="/login">Sign in</a>
-              <a class="ghost-btn" href="/register">Create account</a>
-            </div>
-          {/if}
-        </div>
-
-        <aside class="hero-visual" aria-label="Highlights">
-          <div class="visual-card">
-            <span class="visual-icon">◉</span>
-            <span class="visual-title">Live Stream</span>
-            <span class="visual-copy">Watch each turn as it happens.</span>
+      <div class="hero-copy stack">
+        <h1>
+          <span class="hero-word">REMOTE</span>
+          <span class="hero-caption"><span class="hero-script">Codex workflows</span> from any browser</span>
+        </h1>
+        <p>
+          Codex Remote lets you start and supervise Codex CLI sessions running on your machine from any browser.
+        </p>
+        {#if isLocalMode && !hasConfiguredUrl}
+          <div class="hero-actions row">
+            <a class="primary-btn" href="/settings">Configure Anchor URL</a>
           </div>
-          <div class="visual-card">
-            <span class="visual-icon">◌</span>
-            <span class="visual-title">Approve Actions</span>
-            <span class="visual-copy">Confirm edits and commands remotely.</span>
+          <p class="local-mode-hint">Local mode active - no sign-in required</p>
+        {:else if isLocalMode && hasConfiguredUrl}
+          <div class="hero-actions row">
+            <a class="primary-btn" href="/app">Go to app</a>
+            <a class="ghost-btn" href="/settings">Settings</a>
           </div>
-          <div class="visual-card">
-            <span class="visual-icon">◎</span>
-            <span class="visual-title">Multi Device</span>
-            <span class="visual-copy">Use desktop, tablet, or phone.</span>
+          <p class="local-mode-hint">Local mode active - no sign-in required</p>
+        {:else if !isSignedIn}
+          <div class="hero-actions row">
+            <a class="primary-btn" href="/login">Sign in</a>
+            <a class="ghost-btn" href="/register">Create account</a>
           </div>
-        </aside>
+        {/if}
       </div>
     </main>
 
+    <div class="features-lead">Field notes</div>
     <section class="features">
       <div class="feature">
         <span class="feature-index">01</span>
@@ -103,7 +83,7 @@
       <div class="feature">
         <span class="feature-index">03</span>
         <span class="feature-label">Handheld</span>
-        <p>Approve writes, review diffs, and control long-running tasks from your phone.</p>
+        <p>Approve writes, review diffs, and control long-running tasks from a phone.</p>
       </div>
     </section>
   </div>
@@ -118,7 +98,7 @@
     min-height: 100vh;
     background: var(--cli-bg);
     color: var(--cli-text);
-    font-family: var(--font-sans);
+    font-family: var(--font-editorial);
     padding: var(--space-md);
   }
 
@@ -161,6 +141,7 @@
     font-weight: 600;
     letter-spacing: 0.025em;
     line-height: 1;
+    color: var(--cli-prefix-agent);
   }
 
   .brand-accent {
@@ -193,20 +174,12 @@
   .hero {
     align-items: flex-start;
     text-align: left;
-    padding: clamp(1.1rem, 4vw, 2.8rem) var(--space-md) var(--space-md);
+    padding: clamp(4.8rem, 7.5vw, 6.6rem) var(--space-md) clamp(1.6rem, 3vw, 2.4rem);
     border-bottom: 1px solid var(--landing-line);
   }
 
-  .hero-grid {
-    width: 100%;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
-    gap: clamp(var(--space-md), 2.6vw, var(--space-xl));
-    align-items: start;
-  }
-
   .hero-copy {
-    max-width: 760px;
+    max-width: 620px;
     --stack-gap: var(--space-md);
   }
 
@@ -218,31 +191,29 @@
     text-wrap: balance;
   }
 
-  .hero-kicker {
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--cli-text-muted);
-  }
-
   .hero-word {
     font-family: var(--font-editorial);
     font-style: italic;
-    font-weight: 700;
-    font-size: clamp(3.1rem, 11vw, 6.8rem);
+    font-weight: 800;
+    font-size: clamp(4.2rem, 13.8vw, 9.4rem);
     text-transform: uppercase;
-    letter-spacing: -0.018em;
-    line-height: 0.86;
+    letter-spacing: -0.02em;
+    line-height: 0.84;
     color: var(--cli-text);
+    display: block;
+    width: max-content;
+    margin-left: 0;
   }
 
   .hero-caption {
-    font-family: var(--font-sans);
-    font-size: clamp(1.28rem, 2.5vw, 1.82rem);
-    line-height: 1.12;
-    letter-spacing: -0.006em;
+    font-family: var(--font-editorial);
+    font-size: clamp(0.72rem, 1.2vw, 0.96rem);
+    font-weight: 300;
+    line-height: 1.14;
+    letter-spacing: 0.002em;
     color: var(--cli-text-dim);
+    max-width: 34ch;
+    text-transform: none;
   }
 
   .hero-script {
@@ -257,50 +228,10 @@
     color: var(--cli-text-dim);
     max-width: 620px;
     line-height: 1.5;
-    font-size: 1.03rem;
-    font-family: var(--font-sans);
+    font-size: 0.98rem;
+    font-family: var(--font-editorial);
+    font-weight: 300;
     letter-spacing: 0.003em;
-  }
-
-  .hero-visual {
-    display: grid;
-    gap: var(--space-sm);
-  }
-
-  .visual-card {
-    display: grid;
-    gap: 0.2rem;
-    padding: 0.92rem 0.96rem;
-    border-radius: var(--radius-md);
-    border: 1px solid color-mix(in srgb, var(--cli-border) 36%, transparent);
-    background:
-      linear-gradient(
-        165deg,
-        color-mix(in srgb, var(--cli-bg-elevated) 88%, var(--color-text-inverse)),
-        color-mix(in srgb, var(--cli-bg) 80%, transparent)
-      );
-  }
-
-  .visual-icon {
-    font-family: var(--font-mono);
-    color: var(--cli-prefix-agent);
-    font-size: 0.76rem;
-    letter-spacing: 0.1em;
-  }
-
-  .visual-title {
-    font-family: var(--font-sans);
-    font-size: 1.08rem;
-    font-weight: 700;
-    letter-spacing: 0.004em;
-    color: var(--cli-text);
-  }
-
-  .visual-copy {
-    font-family: var(--font-sans);
-    font-size: 0.9rem;
-    color: var(--cli-text-dim);
-    line-height: 1.35;
   }
 
   .hero-actions {
@@ -332,18 +263,18 @@
     border: 1px solid var(--cli-border);
     background: var(--color-btn-primary-bg, var(--cli-prefix-agent));
     color: var(--color-btn-primary-text, var(--cli-bg));
-    box-shadow: none;
+    box-shadow: var(--shadow-sm);
   }
 
   .ghost-btn {
     background: transparent;
-    border: 1px solid var(--cli-border);
+    border: 1px solid color-mix(in srgb, var(--cli-border) 80%, transparent);
     color: var(--cli-text-dim);
     box-shadow: none;
   }
 
   .primary-btn:hover {
-    opacity: 0.9;
+    opacity: 0.96;
   }
 
   .ghost-btn:hover {
@@ -357,50 +288,66 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--space-md);
-    padding: var(--space-md);
+    padding: 0 var(--space-md) clamp(1.4rem, 3.2vw, 2.2rem);
+  }
+
+  .features-lead {
+    margin: clamp(1.6rem, 4vw, 2.5rem) var(--space-md) clamp(0.75rem, 1.9vw, 1.25rem);
+    padding: 0.78rem 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--cli-border) 35%, transparent);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--cli-text-muted);
   }
 
   .feature {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
-    min-height: 7.5rem;
-    padding: 0.88rem 0.92rem;
-    border: 1px solid color-mix(in srgb, var(--cli-border) 34%, transparent);
+    min-height: 8.7rem;
+    padding: 1.4rem 1.5rem 1.8rem;
+    border: 1px solid color-mix(in srgb, var(--cli-border) 42%, transparent);
     border-radius: var(--radius-md);
-    background:
-      linear-gradient(
-        170deg,
-        color-mix(in srgb, var(--cli-bg-elevated) 90%, var(--color-text-inverse)),
-        color-mix(in srgb, var(--cli-bg) 84%, transparent)
-      );
+    background: transparent;
     box-shadow: none;
   }
 
   .feature-label {
-    font-family: var(--font-sans);
+    font-family: var(--font-editorial);
     font-size: 1.54rem;
-    text-transform: uppercase;
-    letter-spacing: -0.008em;
+    text-transform: none;
+    letter-spacing: -0.002em;
     color: var(--cli-text);
-    font-weight: 800;
+    font-weight: 400;
   }
 
   .feature-index {
     font-family: var(--font-mono);
-    font-size: 0.68rem;
+    font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--cli-prefix-agent);
+    font-weight: 600;
   }
 
   .feature p {
     margin: 0;
     color: var(--cli-text-dim);
-    line-height: 1.42;
-    font-family: var(--font-sans);
-    font-size: 1.02rem;
+    line-height: 1.48;
+    font-family: var(--font-editorial);
+    font-size: 0.92rem;
+    font-weight: 300;
     letter-spacing: 0.004em;
+  }
+
+  :global(:root[data-theme="light"]) .landing-frame {
+    box-shadow: var(--shadow-md);
+  }
+
+  :global(:root[data-theme="light"]) .features-lead {
+    border-bottom-color: color-mix(in srgb, var(--cli-border) 45%, transparent);
   }
 
   /* Footer */
@@ -426,16 +373,22 @@
       padding: var(--space-sm);
     }
 
-    .hero-grid {
-      grid-template-columns: 1fr;
+    .hero {
+      padding-top: 2.8rem;
+      padding-bottom: 1.4rem;
     }
 
-    .hero-visual {
-      grid-template-columns: 1fr;
+    .features-lead {
+      margin-top: 1.4rem;
+      margin-bottom: 1rem;
     }
 
     .hero p {
       font-size: 1.04rem;
+    }
+
+    .hero-word {
+      margin-left: 0;
     }
 
     .features {

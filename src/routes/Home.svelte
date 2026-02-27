@@ -468,19 +468,21 @@
 
         <section class="pane-toolbar split">
           <div class="pane-count row">
-            <span>Input windows</span>
-            {#each PANE_COUNT_OPTIONS as count}
-              <button
-                type="button"
-                class="count-btn"
-                class:active={paneCount === count}
-                onclick={() => {
-                  paneCount = count;
-                }}
-              >
-                {count}
-              </button>
-            {/each}
+            <span class="count-label">Input windows</span>
+            <div class="count-group row">
+              {#each PANE_COUNT_OPTIONS as count}
+                <button
+                  type="button"
+                  class="count-btn"
+                  class:active={paneCount === count}
+                  onclick={() => {
+                    paneCount = count;
+                  }}
+                >
+                  {count}
+                </button>
+              {/each}
+            </div>
           </div>
           <span class="pane-hint">Each window has its own project, mode and model.</span>
         </section>
@@ -731,33 +733,51 @@
     color: var(--cli-text-dim);
     font-size: var(--text-xs);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-weight: 700;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    font-family: var(--font-mono);
+  }
+
+  .count-label {
+    color: var(--cli-text-muted);
+  }
+
+  .count-group {
+    --row-gap: 0;
+    border: 1px solid color-mix(in srgb, var(--cli-border) 52%, transparent);
+    border-radius: var(--radius-md);
+    overflow: hidden;
   }
 
   .count-btn {
-    border: 1px solid var(--cli-border);
-    border-radius: var(--radius-sm);
+    border: 0;
+    border-right: 1px solid color-mix(in srgb, var(--cli-border) 52%, transparent);
+    border-radius: 0;
     background: transparent;
     color: var(--cli-text-muted);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     font-weight: 600;
-    padding: 0.25rem 0.45rem;
+    min-width: 2rem;
+    padding: 0.28rem 0.52rem;
     box-shadow: none;
     cursor: pointer;
   }
 
+  .count-group .count-btn:last-child {
+    border-right: 0;
+  }
+
   .count-btn.active {
-    background: color-mix(in srgb, var(--cli-prefix-agent) 20%, transparent);
-    color: var(--cli-prefix-agent);
-    border-color: color-mix(in srgb, var(--cli-prefix-agent) 45%, var(--cli-border));
+    background: color-mix(in srgb, var(--cli-text) 11%, transparent);
+    color: var(--cli-text);
   }
 
   .pane-hint {
     color: var(--cli-text-muted);
     font-size: var(--text-xs);
-    font-weight: 600;
+    font-family: var(--font-mono);
+    font-weight: 500;
   }
 
   .pane-grid {

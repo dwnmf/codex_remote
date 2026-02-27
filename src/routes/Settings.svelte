@@ -60,13 +60,20 @@
   </AppHeader>
 
   <div class="content stack">
+    <section class="settings-masthead stack">
+      <span class="settings-kicker">Control plane</span>
+      <h1>SETTINGS</h1>
+      <p>Manage connection, devices, notifications, and account-level actions.</p>
+    </section>
+
     <div class="section stack">
       <div class="section-header">
+        <span class="section-index">01</span>
         <span class="section-title">Connection</span>
       </div>
       <div class="section-body stack">
         <div class="field stack">
-          <label for="orbit-url">{auth.isLocalMode ? "anchor url" : "orbit url"}</label>
+          <label for="orbit-url">{auth.isLocalMode ? "Anchor URL" : "Orbit URL"}</label>
           <input
             id="orbit-url"
             type="text"
@@ -77,7 +84,7 @@
         </div>
         <div class="connect-actions row">
           <button
-            class="connect-btn"
+            class="action-btn"
             type="button"
             onclick={() => {
               if (canDisconnect) {
@@ -109,6 +116,7 @@
 
     <div class="section stack">
       <div class="section-header">
+        <span class="section-index">02</span>
         <span class="section-title">Devices</span>
       </div>
       <div class="section-body stack">
@@ -155,10 +163,11 @@
     {#if !auth.isLocalMode}
       <div class="section stack">
         <div class="section-header">
+          <span class="section-index">04</span>
           <span class="section-title">Account</span>
         </div>
         <div class="section-body stack">
-          <button class="sign-out-btn" type="button" onclick={() => auth.signOut()}>Sign out</button>
+          <button class="action-btn danger" type="button" onclick={() => auth.signOut()}>Sign out</button>
         </div>
       </div>
     {/if}
@@ -177,30 +186,76 @@
 
   .content {
     --stack-gap: var(--space-lg);
-    padding: var(--space-md);
-    max-width: var(--app-max-width);
+    padding: var(--space-md) var(--space-md) var(--space-xl);
+    max-width: min(1480px, calc(100vw - var(--space-md) * 2));
     margin: 0 auto;
     width: 100%;
   }
 
+  .settings-masthead {
+    --stack-gap: 0.3rem;
+    padding: 0.3rem 0 0.6rem;
+  }
+
+  .settings-kicker {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--cli-text-muted);
+  }
+
+  h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(3rem, 9vw, 6.8rem);
+    line-height: 0.82;
+    letter-spacing: -0.015em;
+    text-transform: uppercase;
+  }
+
+  .settings-masthead p {
+    margin: 0;
+    max-width: 56ch;
+    color: var(--cli-text-dim);
+    font-family: var(--font-editorial);
+    font-size: 1rem;
+    line-height: 1.45;
+  }
+
   .section {
     --stack-gap: 0;
-    border: 1px solid var(--cli-border);
+    border: 1px solid color-mix(in srgb, var(--cli-border) 46%, transparent);
     border-radius: var(--radius-md);
     overflow: hidden;
+    background: color-mix(in srgb, var(--cli-bg-elevated) 78%, transparent);
   }
 
   .section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
     padding: var(--space-sm) var(--space-md);
-    background: var(--cli-bg-elevated);
-    border-bottom: 1px solid var(--cli-border);
+    background: color-mix(in srgb, var(--cli-bg-elevated) 90%, var(--cli-bg));
+    border-bottom: 1px solid color-mix(in srgb, var(--cli-border) 46%, transparent);
+  }
+
+  .section-index {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--cli-prefix-agent);
+    font-weight: 600;
   }
 
   .section-title {
-    font-size: var(--text-xs);
+    font-family: var(--font-display);
+    font-size: 1.15rem;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--cli-text-dim);
+    letter-spacing: 0.02em;
+    color: var(--cli-text);
+    font-weight: 500;
   }
 
   .section-body {
@@ -213,18 +268,22 @@
   }
 
   .field label {
+    font-family: var(--font-mono);
     color: var(--cli-text-dim);
-    font-size: var(--text-xs);
-    text-transform: lowercase;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
   }
 
   .field input {
-    padding: var(--space-sm);
+    padding: 0.55rem 0.62rem;
     background: var(--cli-bg);
     border: 1px solid var(--cli-border);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     color: var(--cli-text);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
   }
 
   .field input:focus {
@@ -242,26 +301,39 @@
     gap: var(--space-sm);
   }
 
-  .connect-btn {
+  .action-btn {
     padding: var(--space-xs) var(--space-sm);
     background: transparent;
-    border: 1px solid var(--cli-border);
-    border-radius: var(--radius-sm);
+    border: 1px solid color-mix(in srgb, var(--cli-border) 72%, transparent);
+    border-radius: var(--radius-md);
     color: var(--cli-text);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.035em;
+    font-weight: 600;
     cursor: pointer;
     transition: all var(--transition-fast);
   }
 
-  .connect-btn:hover:enabled {
+  .action-btn:hover:enabled {
     background: var(--cli-bg-hover);
     border-color: var(--cli-text-muted);
   }
 
-  .connect-btn:disabled {
+  .action-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  .action-btn.danger {
+    color: var(--cli-error);
+    border-color: color-mix(in srgb, var(--cli-error) 42%, var(--cli-border));
+  }
+
+  .action-btn.danger:hover {
+    background: var(--cli-error-bg);
+    border-color: var(--cli-error);
   }
 
   .anchor-list {
@@ -332,9 +404,10 @@
 
   .hint {
     color: var(--cli-text-muted);
-    font-size: var(--text-xs);
+    font-size: 0.78rem;
     line-height: 1.5;
     margin: 0;
+    font-family: var(--font-sans);
   }
 
   .hint-error {
@@ -349,28 +422,11 @@
     color: var(--cli-text-dim);
     background: var(--cli-bg-elevated);
     padding: 1px 4px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
+    font-family: var(--font-mono);
   }
 
   .hint a {
     color: var(--cli-prefix-agent);
-  }
-
-  .sign-out-btn {
-    align-self: flex-start;
-    padding: var(--space-xs) var(--space-sm);
-    background: transparent;
-    border: 1px solid var(--cli-border);
-    border-radius: var(--radius-sm);
-    color: var(--cli-error, #ef4444);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-  }
-
-  .sign-out-btn:hover {
-    background: var(--cli-error-bg);
-    border-color: var(--cli-error, #ef4444);
   }
 </style>

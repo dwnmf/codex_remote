@@ -205,18 +205,23 @@
     text-transform: uppercase;
     line-height: 1;
     cursor: pointer;
-    border: 1px solid var(--cli-border);
-    background: var(--color-btn-primary-bg, var(--cli-prefix-agent));
-    color: var(--color-btn-primary-text, var(--cli-bg));
+    border: 1px solid var(--cli-prefix-agent);
+    background: var(--cli-prefix-agent);
+    color: var(--color-text-inverse);
+    box-shadow: var(--shadow-sm);
   }
 
   .primary-btn:hover {
-    opacity: 0.9;
+    filter: brightness(0.94);
   }
 
   .primary-btn:disabled {
-    opacity: 0.5;
+    opacity: 1;
+    background: color-mix(in srgb, var(--cli-prefix-agent) 58%, var(--cli-bg-elevated));
+    border-color: color-mix(in srgb, var(--cli-prefix-agent) 48%, var(--cli-border));
+    color: var(--cli-text-muted);
     cursor: not-allowed;
+    box-shadow: none;
   }
 
   .link-btn {

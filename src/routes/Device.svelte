@@ -1,5 +1,6 @@
 <script lang="ts">
   import { auth } from "../lib/auth.svelte";
+  import AuthPageLayout from "../lib/components/AuthPageLayout.svelte";
 
   const AUTH_BASE_URL = (import.meta.env.AUTH_URL ?? "").replace(/\/$/, "");
 
@@ -56,111 +57,117 @@
   }
 </script>
 
-<div class="device-shell stack">
-  <div class="device-card stack">
-    {#if auth.status === "loading"}
-      <div class="subtitle">Loading...</div>
-    {:else if auth.status !== "signed_in"}
-      <div class="title">Sign in required</div>
-      <div class="subtitle">You must be signed in to authorise a device.</div>
-      <a href="/" class="primary-link">Go to sign in</a>
-    {:else if success}
-      <div class="check">✓</div>
-      <div class="title">Device authorised</div>
-      <div class="subtitle">Your anchor is now connected. You can close this page.</div>
-    {:else}
-      <div class="title">Connect anchor</div>
-      <div class="subtitle">Enter the code shown in your terminal.</div>
+<svelte:head>
+  <title>Device authorisation - Codex Remote</title>
+</svelte:head>
 
-      {#if error}
-        <div class="error">{error}</div>
-      {/if}
+<AuthPageLayout>
+  <span class="eyebrow">Device authorisation</span>
 
-      <form class="form stack" onsubmit={handleAuthorise}>
-        <input
-          type="text"
-          class="code-input"
-          placeholder="XXXX-XXXX"
-          value={userCode}
-          oninput={handleInput}
-          maxlength="9"
-          autocomplete="off"
-          spellcheck="false"
-        />
-        <button
-          type="submit"
-          class="primary"
-          disabled={busy || userCode.replace(/-/g, "").length !== 8}
-        >
-          {busy ? "Authorising..." : "Authorise"}
-        </button>
-      </form>
+  {#if auth.status === "loading"}
+    <h1>Loading</h1>
+    <p class="subtitle">Checking your session...</p>
+  {:else if auth.status !== "signed_in"}
+    <h1>Sign in required</h1>
+    <p class="subtitle">You need an active account session before authorising a device.</p>
+    <a href="/" class="primary-link">Go to sign in</a>
+  {:else if success}
+    <h1>Device authorised</h1>
+    <p class="subtitle">Your anchor is connected. You can close this page.</p>
+    <a href="/app" class="link-btn">Open app</a>
+  {:else}
+    <h1>Connect anchor</h1>
+    <p class="subtitle">Enter the code shown in your terminal.</p>
+
+    {#if error}
+      <div class="auth-error">{error}</div>
     {/if}
-  </div>
-</div>
+
+    <form class="form stack" onsubmit={handleAuthorise}>
+      <input
+        type="text"
+        class="auth-input code-input"
+        placeholder="XXXX-XXXX"
+        value={userCode}
+        oninput={handleInput}
+        maxlength="9"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button
+        type="submit"
+        class="primary-btn"
+        disabled={busy || userCode.replace(/-/g, "").length !== 8}
+      >
+        {busy ? "Authorising..." : "Authorise"}
+      </button>
+    </form>
+  {/if}
+</AuthPageLayout>
 
 <style>
-  .device-shell {
-    min-height: 100vh;
-    background: var(--cli-bg);
-    color: var(--cli-text);
+  .eyebrow {
     font-family: var(--font-mono);
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-xl) var(--space-md);
-    --stack-gap: 0;
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--cli-text-muted);
   }
 
-  .device-card {
-    width: 100%;
-    max-width: 400px;
-    padding: var(--space-lg);
-    --stack-gap: var(--space-md);
-    text-align: center;
-  }
-
-  .check {
-    font-size: 2rem;
-    color: var(--cli-success);
-  }
-
-  .title {
-    font-size: var(--text-lg);
-    font-weight: 600;
+  h1 {
+    margin: 0;
+    font-size: clamp(2.2rem, 5vw, 3.6rem);
+    line-height: 0.9;
+    letter-spacing: -0.018em;
+    text-transform: uppercase;
   }
 
   .subtitle {
+    margin: 0;
     color: var(--cli-text-dim);
-    font-size: var(--text-sm);
+    font-size: 1.02rem;
+    line-height: 1.5;
+    max-width: 34ch;
+    font-family: var(--font-editorial);
   }
 
-  .error {
-    padding: var(--space-sm);
-    border-radius: var(--radius-sm);
+  .auth-error {
+    padding: 0.62rem 0.72rem;
+    border-radius: var(--radius-md);
     background: var(--cli-error-bg);
+    border: 1px solid color-mix(in srgb, var(--cli-error) 46%, transparent);
     color: var(--cli-error);
-    font-size: var(--text-sm);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: 0.01em;
   }
 
   .form {
     --stack-gap: var(--space-md);
   }
 
-  .code-input {
-    padding: var(--space-md);
-    background: var(--cli-bg-elevated);
+  .auth-input {
+    padding: 0.62rem 0.74rem;
+    border-radius: var(--radius-md);
     border: 1px solid var(--cli-border);
-    border-radius: var(--radius-sm);
+    background: var(--cli-bg);
     color: var(--cli-text);
-    font-family: var(--font-mono);
-    font-size: var(--text-lg);
-    text-align: center;
-    letter-spacing: 0.15em;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    letter-spacing: 0.008em;
+    text-transform: none;
     outline: none;
   }
 
-  .code-input:focus {
-    border-color: var(--cli-prefix-agent);
+  .auth-input:focus {
+    border-color: var(--cli-text-dim);
+  }
+
+  .code-input {
+    text-align: center;
+    letter-spacing: 0.15em;
+    font-family: var(--font-mono);
+    font-size: 1.22rem;
   }
 
   .code-input::placeholder {
@@ -168,32 +175,62 @@
     letter-spacing: 0.15em;
   }
 
-  button.primary {
-    padding: var(--space-sm) var(--space-md);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--cli-border);
-    background: var(--cli-prefix-agent);
-    color: var(--cli-bg);
+  .primary-btn {
+    padding: 0.58rem 0.72rem;
+    border-radius: var(--radius-md);
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    line-height: 1;
     cursor: pointer;
+    border: 1px solid var(--cli-prefix-agent);
+    background: var(--cli-prefix-agent);
+    color: var(--color-text-inverse);
+    box-shadow: var(--shadow-sm);
   }
 
-  button.primary:disabled {
-    opacity: 0.5;
+  .primary-btn:hover {
+    filter: brightness(0.94);
+  }
+
+  .primary-btn:disabled {
+    opacity: 1;
+    background: color-mix(in srgb, var(--cli-prefix-agent) 58%, var(--cli-bg-elevated));
+    border-color: color-mix(in srgb, var(--cli-prefix-agent) 48%, var(--cli-border));
+    color: var(--cli-text-muted);
     cursor: not-allowed;
+    box-shadow: none;
   }
 
   .primary-link {
-    display: inline-block;
-    padding: var(--space-sm) var(--space-md);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--cli-border);
+    align-self: flex-start;
+    padding: 0.58rem 0.72rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--cli-prefix-agent);
     background: var(--cli-prefix-agent);
-    color: var(--cli-bg);
+    color: var(--color-text-inverse);
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
     text-decoration: none;
-    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .link-btn {
+    align-self: flex-start;
+    color: var(--cli-text-dim);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--cli-text-muted) 60%, transparent);
+  }
+
+  .link-btn:hover {
+    color: var(--cli-text);
   }
 </style>
