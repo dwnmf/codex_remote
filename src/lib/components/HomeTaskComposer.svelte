@@ -160,8 +160,10 @@
         </button>
         {#if modelOpen}
           <div class="dropdown-menu">
-            {#if modelsStatus === "loading"}
-              <div class="dropdown-empty">Loading...</div>
+            {#if modelsStatus === "loading" || modelsStatus === "idle"}
+              <div class="dropdown-empty">Loading models...</div>
+            {:else if modelsStatus === "error"}
+              <div class="dropdown-empty">Failed to load models</div>
             {:else if modelOptions.length === 0}
               <div class="dropdown-empty">No models available</div>
             {:else}

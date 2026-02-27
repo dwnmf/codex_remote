@@ -421,7 +421,7 @@
                         {reasoningEffort}
                         {mode}
                         modelOptions={models.options}
-                        modelsLoading={models.status === "loading"}
+                        modelsLoading={models.status === "loading" || models.status === "idle"}
                         disabled={(messages.turnStatus ?? "").toLowerCase() === "inprogress" || !socket.isHealthy}
                         onStop={(messages.turnStatus ?? "").toLowerCase() === "inprogress" ? handleStop : undefined}
                         onSubmit={handleSubmit}

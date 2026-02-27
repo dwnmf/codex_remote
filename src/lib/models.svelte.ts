@@ -4,6 +4,7 @@ import { anchors } from "./anchors.svelte";
 import { auth } from "./auth.svelte";
 
 type FetchStatus = "idle" | "loading" | "success" | "error";
+const MODEL_LIST_TIMEOUT_MS = 12_000;
 
 class ModelsStore {
   options = $state<ModelOption[]>([]);
@@ -13,11 +14,19 @@ class ModelsStore {
   );
 
   #requestId: number | null = null;
+  #requestTimeout: ReturnType<typeof setTimeout> | null = null;
+  #lastAnchorId: string | null = null;
 
   constructor() {
     socket.onMessage((msg) => this.#handleMessage(msg));
     socket.onConnect(() => {
       if (this.status === "success" && this.options.length > 0) return;
+      this.refresh();
+    });
+    anchors.onSelectionChange((anchorId) => {
+      const nextAnchorId = auth.isLocalMode ? null : anchorId;
+      if (this.#lastAnchorId === nextAnchorId) return;
+      this.#lastAnchorId = nextAnchorId;
       this.refresh();
     });
   }
@@ -30,6 +39,7 @@ class ModelsStore {
 
   /** Force refresh models */
   refresh() {
+    this.#clearPendingRequest();
     this.status = "idle";
     this.#send();
   }
@@ -39,6 +49,7 @@ class ModelsStore {
 
     this.#requestId = Date.now();
     this.status = "loading";
+    this.#armTimeout(this.#requestId);
 
     socket.send({
       method: "model/list",
@@ -51,7 +62,7 @@ class ModelsStore {
     // Only handle our request
     if (!this.#requestId || msg.id !== this.#requestId) return;
 
-    this.#requestId = null;
+    this.#clearPendingRequest();
 
     if (msg.error) {
       this.status = "error";
@@ -61,6 +72,27 @@ class ModelsStore {
 
     this.options = this.#parseModels(msg.result);
     this.status = this.options.length > 0 ? "success" : "error";
+  }
+
+  #armTimeout(requestId: number) {
+    this.#clearRequestTimeout();
+    this.#requestTimeout = setTimeout(() => {
+      if (this.#requestId !== requestId) return;
+      this.#clearPendingRequest();
+      this.status = "error";
+      console.error("Failed to fetch models: request timed out");
+    }, MODEL_LIST_TIMEOUT_MS);
+  }
+
+  #clearPendingRequest() {
+    this.#requestId = null;
+    this.#clearRequestTimeout();
+  }
+
+  #clearRequestTimeout() {
+    if (!this.#requestTimeout) return;
+    clearTimeout(this.#requestTimeout);
+    this.#requestTimeout = null;
   }
 
   #parseModels(result: unknown): ModelOption[] {

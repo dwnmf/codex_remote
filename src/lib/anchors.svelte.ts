@@ -18,6 +18,7 @@ class AnchorsStore {
   status = $state<AnchorStatus>("unknown");
   selectedId = $state<string | null>(null);
   #checkTimeout: ReturnType<typeof setTimeout> | null = null;
+  #selectionHandlers = new Set<(anchorId: string | null) => void>();
 
   constructor() {
     if (typeof window === "undefined") return;
@@ -72,8 +73,13 @@ class AnchorsStore {
   }
 
   select(anchorId: string | null) {
-    this.selectedId = anchorId;
-    this.#saveSelection();
+    this.#setSelectedId(anchorId, true);
+  }
+
+  onSelectionChange(handler: (anchorId: string | null) => void) {
+    this.#selectionHandlers.add(handler);
+    handler(this.selectedId);
+    return () => this.#selectionHandlers.delete(handler);
   }
 
   #armTimeout() {
@@ -93,11 +99,18 @@ class AnchorsStore {
   }
 
   #reconcileSelection() {
-    if (!this.selectedId) return;
-    const online = this.list.some((anchor) => anchor.id === this.selectedId);
-    if (online) return;
-    this.selectedId = null;
-    this.#saveSelection();
+    if (this.selectedId && this.list.some((anchor) => anchor.id === this.selectedId)) {
+      return;
+    }
+
+    if (this.list.length === 1) {
+      this.#setSelectedId(this.list[0].id, true);
+      return;
+    }
+
+    if (this.selectedId) {
+      this.#setSelectedId(null, true);
+    }
   }
 
   #loadSelection() {
@@ -106,6 +119,22 @@ class AnchorsStore {
       this.selectedId = value ? value : null;
     } catch {
       this.selectedId = null;
+    }
+  }
+
+  #setSelectedId(anchorId: string | null, persist: boolean) {
+    const normalized = anchorId?.trim() ? anchorId.trim() : null;
+    if (this.selectedId === normalized) return;
+    this.selectedId = normalized;
+    if (persist) {
+      this.#saveSelection();
+    }
+    this.#notifySelectionChange();
+  }
+
+  #notifySelectionChange() {
+    for (const handler of this.#selectionHandlers) {
+      handler(this.selectedId);
     }
   }
 
