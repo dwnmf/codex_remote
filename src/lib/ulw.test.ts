@@ -3,6 +3,7 @@ import type { Message } from "./types";
 import {
   ULW_DEFAULT_COMPLETION_PROMISE,
   ULW_DEFAULT_MAX_ITERATIONS,
+  UlwLoopRunner,
   UlwRuntime,
   buildUlwContinuationPrompt,
   buildUlwKickoffPrompt,
@@ -96,5 +97,49 @@ describe("prompt builders", () => {
     const continuation = buildUlwContinuationPrompt(state);
     expect(kickoff.includes("<promise>DONE</promise>")).toBe(true);
     expect(continuation.includes("<promise>DONE</promise>")).toBe(true);
+  });
+});
+
+describe("UlwLoopRunner", () => {
+  test("uses latest deps sendTurn immediately after updateDeps", () => {
+    const runner = new UlwLoopRunner();
+    const threadId = "thread-loop-update-deps";
+    const sentByLegacy: string[] = [];
+    const sentByFresh: string[] = [];
+    let legacyCallback: ((finishedThreadId: string, finalText: string) => void) | null = null;
+
+    const legacyDeps = {
+      sendTurn: (_threadId: string, inputText: string): boolean => {
+        sentByLegacy.push(inputText);
+        return true;
+      },
+      onTurnComplete: (
+        _threadId: string,
+        callback: (finishedThreadId: string, finalText: string) => void,
+      ): (() => void) => {
+        legacyCallback = callback;
+        return () => {};
+      },
+    };
+
+    const freshDeps = {
+      sendTurn: (_threadId: string, inputText: string): boolean => {
+        sentByFresh.push(inputText);
+        return true;
+      },
+      onTurnComplete: (
+        _threadId: string,
+        _callback: (finishedThreadId: string, finalText: string) => void,
+      ): (() => void) => () => {},
+    };
+
+    runner.start(threadId, { task: "check deps swap" }, legacyDeps);
+    runner.updateDeps(threadId, freshDeps);
+    legacyCallback?.(threadId, "still working");
+
+    expect(sentByLegacy.length).toBe(1);
+    expect(sentByFresh.length).toBe(1);
+
+    runner.stop(threadId);
   });
 });

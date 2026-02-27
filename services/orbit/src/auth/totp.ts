@@ -80,6 +80,14 @@ function normalizeCode(code: string): string {
   return code.replace(/\s|-/g, "");
 }
 
+function normalizeWindow(window: number | undefined): number {
+  const raw = window ?? 1;
+  if (!Number.isFinite(raw) || !Number.isInteger(raw) || raw < 0) {
+    throw new RangeError("TOTP window must be a finite non-negative integer.");
+  }
+  return raw;
+}
+
 async function hmacSha1(keyBytes: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -137,7 +145,7 @@ export async function verifyTotpCode(
 
   const periodSec = options.periodSec ?? DEFAULT_PERIOD_SEC;
   const step = currentStep(options.nowMs ?? Date.now(), periodSec);
-  const window = Math.max(options.window ?? 1, 0);
+  const window = normalizeWindow(options.window);
 
   for (let offset = -window; offset <= window; offset += 1) {
     const candidateStep = step + offset;

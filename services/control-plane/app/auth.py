@@ -87,7 +87,7 @@ def extract_token_from_request(request: Request) -> str | None:
     token = parse_bearer_token(request.headers.get("authorization"))
     if token:
         return token
-    query_token = request.query_params.get("token")
+    query_token = (request.query_params.get("token") or "").strip()
     return query_token or None
 
 

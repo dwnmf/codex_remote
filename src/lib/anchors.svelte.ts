@@ -85,9 +85,11 @@ class AnchorsStore {
   #armTimeout() {
     this.#clearTimeout();
     this.#checkTimeout = setTimeout(() => {
-      if (this.status === "checking" && this.list.length === 0) {
-        this.status = "none";
-      }
+      this.#checkTimeout = null;
+      if (this.status !== "checking") return;
+      this.list = [];
+      this.status = "none";
+      this.#reconcileSelection();
     }, ANCHOR_CHECK_TIMEOUT_MS);
   }
 

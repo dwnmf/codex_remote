@@ -9,6 +9,15 @@ interface Prefs {
   pushEnabled: boolean;
 }
 
+function canUsePushApi(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  return "serviceWorker" in navigator && "PushManager" in window;
+}
+
+function canCheckServiceWorkerSubscription(): boolean {
+  return typeof navigator !== "undefined" && "serviceWorker" in navigator;
+}
+
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -35,7 +44,7 @@ class NotificationsStore {
   }
 
   get pushAvailable(): boolean {
-    return !!(VAPID_PUBLIC_KEY && "serviceWorker" in navigator && "PushManager" in window);
+    return !!(VAPID_PUBLIC_KEY && canUsePushApi());
   }
 
   async subscribePush(): Promise<boolean> {
@@ -90,7 +99,12 @@ class NotificationsStore {
   }
 
   async #checkExistingPushSubscription(): Promise<void> {
-    if (!("serviceWorker" in navigator)) return;
+    if (!canCheckServiceWorkerSubscription()) {
+      this.#pushSubscription = null;
+      this.#pushSubscribed = false;
+      this.#savePrefs();
+      return;
+    }
 
     try {
       const reg = await navigator.serviceWorker.ready;
@@ -103,7 +117,9 @@ class NotificationsStore {
         this.#savePrefs();
       }
     } catch {
+      this.#pushSubscription = null;
       this.#pushSubscribed = false;
+      this.#savePrefs();
     }
   }
 
@@ -159,7 +175,9 @@ function getStore(): NotificationsStore {
     const store = new NotificationsStore();
     global[STORE_KEY] = store;
     // Re-send push subscription on every reconnect
-    socket.onConnect(() => store.resendPushSubscription());
+    if (typeof socket.onConnect === "function") {
+      socket.onConnect(() => store.resendPushSubscription());
+    }
   }
   return global[STORE_KEY] as NotificationsStore;
 }

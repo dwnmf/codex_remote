@@ -23,6 +23,11 @@ interface SavedConfig {
   url: string;
 }
 
+function normalizeUrlValue(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  return value.trim();
+}
+
 class ConfigStore {
   #url = $state(DEFAULT_WS_URL);
 
@@ -34,16 +39,21 @@ class ConfigStore {
     return this.#url;
   }
   set url(value: string) {
-    this.#url = value;
+    const normalized = normalizeUrlValue(value);
+    if (normalized === null || normalized === this.#url) return;
+    this.#url = normalized;
     this.#save();
   }
 
   #load() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const data = JSON.parse(saved) as SavedConfig;
-        this.#url = data.url || this.#url;
+      if (!saved) return;
+      const parsed: unknown = JSON.parse(saved);
+      if (!parsed || typeof parsed !== "object") return;
+      const savedUrl = normalizeUrlValue((parsed as { url?: unknown }).url);
+      if (savedUrl !== null) {
+        this.#url = savedUrl;
       }
     } catch {
       // ignore
@@ -52,8 +62,9 @@ class ConfigStore {
 
   #save() {
     try {
+      const normalized = normalizeUrlValue(this.#url) ?? "";
       const data: SavedConfig = {
-        url: this.#url,
+        url: normalized,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch {

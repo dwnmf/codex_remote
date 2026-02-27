@@ -35,7 +35,9 @@ export async function verifyJwtHs256(
   expected: { issuer: string; audience: string },
   clockSkewSec = 30
 ): Promise<boolean> {
-  const [headerPart, payloadPart, signaturePart] = token.split(".");
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  const [headerPart, payloadPart, signaturePart] = parts;
   if (!headerPart || !payloadPart || !signaturePart) return false;
 
   const header = parseJwtPart<{ alg?: string }>(headerPart);

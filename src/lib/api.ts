@@ -59,7 +59,12 @@ async function request<T>(
 
   // On 401, attempt token refresh and retry once
   if (response.status === 401) {
-    const refreshed = await auth.tryRefresh();
+    let refreshed = false;
+    try {
+      refreshed = await auth.tryRefresh();
+    } catch {
+      refreshed = false;
+    }
     if (refreshed) {
       response = await doFetch(method, baseUrl, path, body);
     }

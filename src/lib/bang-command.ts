@@ -26,8 +26,21 @@ const SHELL_HINTS: Record<TerminalShell, string> = {
   fish: "Use fish.",
 };
 
+function stripMatchingQuotes(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length < 2) return trimmed;
+
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed;
+}
+
 function normalizeShell(raw: string): TerminalShell | null {
-  const trimmed = raw.trim().toLowerCase();
+  const trimmed = stripMatchingQuotes(raw).toLowerCase();
   return SHELL_ALIASES[trimmed] ?? null;
 }
 
@@ -39,21 +52,34 @@ export function parseBangTerminalCommand(input: string): BangTerminalCommand | n
   if (!rest) return { shell: null, command: "" };
 
   const firstWhitespace = rest.search(/\s/);
-  if (firstWhitespace < 0) {
-    const shell = normalizeShell(rest);
-    if (shell) return { shell, command: "" };
-    return { shell: null, command: rest };
-  }
+  const firstColon = rest.indexOf(":");
+  const tokenEnd =
+    firstWhitespace < 0
+      ? firstColon
+      : firstColon < 0
+        ? firstWhitespace
+        : Math.min(firstWhitespace, firstColon);
+  const token = tokenEnd < 0 ? rest : rest.slice(0, tokenEnd);
 
-  const token = rest.slice(0, firstWhitespace).replace(/:$/, "");
   const shell = normalizeShell(token);
   if (!shell) {
     return { shell: null, command: rest };
   }
 
+  let commandStart = tokenEnd < 0 ? rest.length : tokenEnd;
+  while (commandStart < rest.length && /\s/.test(rest[commandStart])) {
+    commandStart += 1;
+  }
+  if (rest[commandStart] === ":") {
+    commandStart += 1;
+    while (commandStart < rest.length && /\s/.test(rest[commandStart])) {
+      commandStart += 1;
+    }
+  }
+
   return {
     shell,
-    command: rest.slice(firstWhitespace).trim(),
+    command: rest.slice(commandStart).trim(),
   };
 }
 

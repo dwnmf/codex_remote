@@ -9,47 +9,40 @@ def as_record(value: Any) -> dict[str, Any] | None:
     return None
 
 
-def extract_thread_id(message: dict[str, Any]) -> str | None:
+def _normalize_id(candidate: Any) -> str | None:
+    if isinstance(candidate, str):
+        normalized = candidate.strip()
+        return normalized or None
+    if isinstance(candidate, int) and not isinstance(candidate, bool):
+        return str(candidate)
+    return None
+
+
+def _extract_id(message: dict[str, Any], *, singular_key: str) -> str | None:
     params = as_record(message.get("params"))
     result = as_record(message.get("result"))
-    thread_from_params = as_record(params.get("thread")) if params else None
-    thread_from_result = as_record(result.get("thread")) if result else None
+    from_params = as_record(params.get(singular_key)) if params else None
+    from_result = as_record(result.get(singular_key)) if result else None
 
     candidates: list[Any] = [
-        params.get("threadId") if params else None,
-        params.get("thread_id") if params else None,
-        result.get("threadId") if result else None,
-        result.get("thread_id") if result else None,
-        thread_from_params.get("id") if thread_from_params else None,
-        thread_from_result.get("id") if thread_from_result else None,
+        params.get(f"{singular_key}Id") if params else None,
+        params.get(f"{singular_key}_id") if params else None,
+        result.get(f"{singular_key}Id") if result else None,
+        result.get(f"{singular_key}_id") if result else None,
+        from_params.get("id") if from_params else None,
+        from_result.get("id") if from_result else None,
     ]
 
     for candidate in candidates:
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate
-        if isinstance(candidate, int):
-            return str(candidate)
+        normalized = _normalize_id(candidate)
+        if normalized is not None:
+            return normalized
     return None
+
+
+def extract_thread_id(message: dict[str, Any]) -> str | None:
+    return _extract_id(message, singular_key="thread")
 
 
 def extract_anchor_id(message: dict[str, Any]) -> str | None:
-    params = as_record(message.get("params"))
-    result = as_record(message.get("result"))
-    anchor_from_params = as_record(params.get("anchor")) if params else None
-    anchor_from_result = as_record(result.get("anchor")) if result else None
-
-    candidates: list[Any] = [
-        params.get("anchorId") if params else None,
-        params.get("anchor_id") if params else None,
-        result.get("anchorId") if result else None,
-        result.get("anchor_id") if result else None,
-        anchor_from_params.get("id") if anchor_from_params else None,
-        anchor_from_result.get("id") if anchor_from_result else None,
-    ]
-
-    for candidate in candidates:
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate
-        if isinstance(candidate, int):
-            return str(candidate)
-    return None
+    return _extract_id(message, singular_key="anchor")

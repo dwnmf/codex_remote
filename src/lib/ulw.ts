@@ -302,7 +302,13 @@ export class UlwLoopRunner {
       if (!next) return;
 
       this.#registerTurnHook(finishedThreadId);
-      const sent = deps.sendTurn(finishedThreadId, buildUlwContinuationPrompt(next));
+      const nextDeps = this.#depsByThread.get(finishedThreadId);
+      if (!nextDeps) {
+        this.stop(finishedThreadId, "send_error");
+        return;
+      }
+
+      const sent = nextDeps.sendTurn(finishedThreadId, buildUlwContinuationPrompt(next));
       if (!sent) {
         this.stop(finishedThreadId, "send_error");
       }

@@ -66,7 +66,14 @@ export function extractTurnId(message: Record<string, unknown>): string | null {
   const turnFromParams = asRecord(params?.turn);
   const turnFromResult = asRecord(result?.turn);
 
-  const candidates = [params?.turnId, params?.turn_id, turnFromParams?.id, turnFromResult?.id];
+  const candidates = [
+    params?.turnId,
+    params?.turn_id,
+    result?.turnId,
+    result?.turn_id,
+    turnFromParams?.id,
+    turnFromResult?.id,
+  ];
 
   for (const candidate of candidates) {
     if (typeof candidate === "string" && candidate.trim()) return candidate;

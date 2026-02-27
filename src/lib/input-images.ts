@@ -3,6 +3,14 @@ import type { TurnImageInput } from "./types";
 export const MAX_TURN_IMAGES = 6;
 export const MAX_TURN_IMAGE_BYTES = 15 * 1024 * 1024;
 
+function normalizeMimeType(type: string | null | undefined): string {
+  return (type ?? "").trim().toLowerCase();
+}
+
+function isImageMimeType(type: string | null | undefined): boolean {
+  return normalizeMimeType(type).startsWith("image/");
+}
+
 function makeImageId(): string {
   const random = Math.random().toString(36).slice(2, 10);
   return `img-${Date.now()}-${random}`;
@@ -28,16 +36,19 @@ export async function readTurnImages(
   existingCount = 0,
 ): Promise<{ images: TurnImageInput[]; errors: string[] }> {
   const list = Array.from(files);
+  const safeExistingCount = Number.isFinite(existingCount) ? Math.max(0, Math.floor(existingCount)) : 0;
   const errors: string[] = [];
   const images: TurnImageInput[] = [];
 
   for (const file of list) {
-    if (existingCount + images.length >= MAX_TURN_IMAGES) {
+    if (safeExistingCount + images.length >= MAX_TURN_IMAGES) {
       errors.push(`Maximum ${MAX_TURN_IMAGES} images per message.`);
       break;
     }
 
-    if (!file.type.startsWith("image/")) {
+    const normalizedType = normalizeMimeType(file.type);
+
+    if (!isImageMimeType(normalizedType)) {
       errors.push(`${file.name}: unsupported file type`);
       continue;
     }
@@ -52,7 +63,7 @@ export async function readTurnImages(
       images.push({
         id: makeImageId(),
         name: file.name,
-        mimeType: file.type || "image/png",
+        mimeType: normalizedType || "image/png",
         bytes: file.size,
         dataUrl,
       });
@@ -70,7 +81,7 @@ export function extractClipboardImageFiles(event: ClipboardEvent): File[] {
   for (const item of items) {
     if (item.kind !== "file") continue;
     const file = item.getAsFile();
-    if (!file || !file.type.startsWith("image/")) continue;
+    if (!file || !isImageMimeType(file.type)) continue;
     files.push(file);
   }
   return files;
