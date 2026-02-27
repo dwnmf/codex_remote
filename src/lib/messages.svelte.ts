@@ -779,6 +779,16 @@ class MessagesStore {
     return this.#buildImageMessageFromPayload(threadId, itemId, payload);
   }
 
+  #coerceTurnStatus(status: unknown, fallback: TurnStatus): TurnStatus {
+    if (typeof status !== "string" || !status.trim()) return fallback;
+    const normalized = status.trim().toLowerCase();
+    if (normalized.includes("progress")) return "InProgress";
+    if (normalized.includes("complete")) return "Completed";
+    if (normalized.includes("fail")) return "Failed";
+    if (normalized.includes("cancel") || normalized.includes("interrupt")) return "Interrupted";
+    return fallback;
+  }
+
   handleMessage(msg: RpcMessage) {
     if (msg.result && !msg.method) {
       const result = msg.result as { thread?: { id: string; turns?: Array<{ items?: unknown[] }> } };
@@ -939,26 +949,39 @@ class MessagesStore {
       return;
     }
 
-    // Turn completed
-    if (method === "turn/completed") {
+    // Turn completed/failed/cancelled/interrupted
+    if (
+      method === "turn/completed" ||
+      method === "turn/failed" ||
+      method === "turn/cancelled" ||
+      method === "turn/interrupted"
+    ) {
       const turn = params.turn as { id: string; status?: string } | undefined;
-      if (turn) {
-        this.#turnStatusByThread = new Map(this.#turnStatusByThread).set(threadId, (turn.status as TurnStatus) || "Completed");
-        this.#interruptPendingByThread.delete(threadId);
-        this.#statusDetailByThread = new Map(this.#statusDetailByThread).set(threadId, null);
+      const fallback: TurnStatus =
+        method === "turn/completed"
+          ? "Completed"
+          : method === "turn/failed"
+            ? "Failed"
+            : "Interrupted";
 
-        // Clear pending live messages for this thread — turn is done
-        for (const [id, msg] of this.#pendingLiveMessages) {
-          if (msg.threadId === threadId) this.#pendingLiveMessages.delete(id);
-        }
+      this.#turnStatusByThread = new Map(this.#turnStatusByThread).set(
+        threadId,
+        this.#coerceTurnStatus(turn?.status, fallback),
+      );
+      this.#interruptPendingByThread.delete(threadId);
+      this.#statusDetailByThread = new Map(this.#statusDetailByThread).set(threadId, null);
 
-        // Fire turn complete callback if registered
-        const callback = this.#turnCompleteCallbacks.get(threadId);
-        if (callback) {
-          const latestMessage = this.getLatestAssistantMessage(threadId);
-          callback(threadId, latestMessage?.text ?? "");
-          this.#turnCompleteCallbacks.delete(threadId);
-        }
+      // Clear pending live messages for this thread — turn is done
+      for (const [id, msg] of this.#pendingLiveMessages) {
+        if (msg.threadId === threadId) this.#pendingLiveMessages.delete(id);
+      }
+
+      // Fire turn complete callback if registered
+      const callback = this.#turnCompleteCallbacks.get(threadId);
+      if (callback) {
+        const latestMessage = this.getLatestAssistantMessage(threadId);
+        callback(threadId, latestMessage?.text ?? "");
+        this.#turnCompleteCallbacks.delete(threadId);
       }
       return;
     }
