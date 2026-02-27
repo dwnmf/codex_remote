@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { untrack } from "svelte";
     import type { ModeKind, ReasoningEffort, SandboxMode, TurnImageInput } from "../lib/types";
     import { route } from "../router";
     import { socket } from "../lib/socket.svelte";
@@ -43,6 +44,7 @@
     const artifactsError = $derived(artifactsStore.getThreadError(threadId));
     const selectedModelOption = $derived(models.options.find((option) => option.value === model) ?? null);
     const threadShortId = $derived(threadId ? threadId.slice(0, 8) : "--------");
+    let lastArtifactsRequestKey: string | null = null;
     const threadStatusLabel = $derived.by(() => {
         if (socket.status === "connected") return "Live";
         if (socket.status === "connecting") return "Connecting";
@@ -101,11 +103,17 @@
     });
 
     $effect(() => {
-        if (!threadId || socket.status !== "connected") return;
-        void artifactsStore.requestThread(
-            threadId,
-            auth.isLocalMode ? undefined : anchors.selectedId ?? undefined,
-        );
+        if (!threadId || socket.status !== "connected") {
+            lastArtifactsRequestKey = null;
+            return;
+        }
+        const anchorId = auth.isLocalMode ? undefined : anchors.selectedId ?? undefined;
+        const requestKey = `${threadId}:${anchorId ?? "local"}`;
+        if (lastArtifactsRequestKey === requestKey) return;
+        lastArtifactsRequestKey = requestKey;
+        untrack(() => {
+            void artifactsStore.requestThread(threadId, anchorId);
+        });
     });
 
     let sendError = $state<string | null>(null);
