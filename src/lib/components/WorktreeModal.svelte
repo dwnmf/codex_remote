@@ -4,6 +4,8 @@
   import { worktrees } from "../worktrees.svelte";
 
   type Step = "project" | "worktree";
+  const SEARCH_START_STORAGE_KEY = "codex_remote_worktree_search_start";
+  const WORKTREE_ROOT_STORAGE_KEY = "codex_remote_worktree_root_dir";
 
   interface Props {
     open: boolean;
@@ -21,15 +23,19 @@
 
   // Directory browser state
   let dirs = $state<string[]>([]);
+  let roots = $state<string[]>([]);
   let currentPath = $state("");
   let parentPath = $state("");
   let browseLoading = $state(false);
   let browseError = $state<string | null>(null);
   let browseRequestId = 0;
+  let searchStartPath = $state(readStoredPath(SEARCH_START_STORAGE_KEY));
 
   // Worktree action state
   let actionError = $state<string | null>(null);
   let actionMessage = $state<string | null>(null);
+  let worktreeRootDir = $state(readStoredPath(WORKTREE_ROOT_STORAGE_KEY));
+  let newWorktreePath = $state("");
 
   const selectedPath = $derived(
     step === "worktree"
@@ -44,16 +50,51 @@
       : !!currentPath.trim()
   );
 
+  function readStoredPath(key: string): string {
+    if (typeof localStorage === "undefined") return "";
+    try {
+      return localStorage.getItem(key)?.trim() ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  function writeStoredPath(key: string, value: string) {
+    if (typeof localStorage === "undefined") return;
+    try {
+      if (value) {
+        localStorage.setItem(key, value);
+      } else {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  function saveSearchStartPath(path: string) {
+    const trimmed = path.trim();
+    searchStartPath = trimmed;
+    writeStoredPath(SEARCH_START_STORAGE_KEY, trimmed);
+  }
+
+  function saveWorktreeRootDir(path: string) {
+    const trimmed = path.trim();
+    worktreeRootDir = trimmed;
+    writeStoredPath(WORKTREE_ROOT_STORAGE_KEY, trimmed);
+  }
+
   async function browse(path?: string) {
     const requestId = ++browseRequestId;
     browseLoading = true;
     browseError = null;
     try {
-      const result = await socket.listDirs(path);
+      const result = await socket.listDirs(path, path ? undefined : searchStartPath || undefined);
       if (requestId !== browseRequestId) return;
       dirs = result.dirs;
       currentPath = result.current;
       parentPath = result.parent;
+      roots = result.roots ?? [];
     } catch (err) {
       if (requestId !== browseRequestId) return;
       browseError = err instanceof Error ? err.message : "Failed to list directories";
@@ -84,6 +125,27 @@
     }
   }
 
+  function openSearchStart() {
+    const value = searchStartPath.trim();
+    saveSearchStartPath(value);
+    void browseAndInspect(value || undefined);
+  }
+
+  function setSearchStartFromCurrent() {
+    if (!currentPath.trim()) return;
+    saveSearchStartPath(currentPath.trim());
+  }
+
+  function jumpToRoot(root: string) {
+    saveSearchStartPath(root);
+    void browseAndInspect(root);
+  }
+
+  function setWorktreeRootFromCurrent() {
+    if (!currentPath.trim()) return;
+    saveWorktreeRootDir(currentPath.trim());
+  }
+
   function goNext() {
     if (!canNext) return;
     step = "worktree";
@@ -98,7 +160,16 @@
     actionError = null;
     actionMessage = null;
     try {
-      await worktrees.create();
+      const path = newWorktreePath.trim();
+      const rootDir = worktreeRootDir.trim();
+      saveWorktreeRootDir(rootDir);
+      await worktrees.create({
+        ...(path ? { path } : {}),
+        ...(rootDir ? { rootDir } : {}),
+      });
+      if (path) {
+        newWorktreePath = "";
+      }
       actionMessage = "Created worktree";
     } catch (err) {
       actionError = err instanceof Error ? err.message : "Failed to create worktree";
@@ -130,6 +201,10 @@
     actionError = null;
     actionMessage = null;
     currentPath = project;
+    roots = [];
+    newWorktreePath = "";
+    searchStartPath = readStoredPath(SEARCH_START_STORAGE_KEY);
+    worktreeRootDir = readStoredPath(WORKTREE_ROOT_STORAGE_KEY);
 
     if (project) {
       void browseAndInspect(project).then(() => {
@@ -173,6 +248,28 @@
 
     <div class="modal-body stack">
       {#if step === "project"}
+        <div class="path-tools stack">
+          <label class="path-label" for="search-start-input">Search start directory</label>
+          <div class="path-input-row row">
+            <input
+              id="search-start-input"
+              class="path-input"
+              type="text"
+              bind:value={searchStartPath}
+              placeholder="C:\\Projects or /Users/name/projects"
+            />
+            <button type="button" class="tiny-btn" onclick={openSearchStart}>Open</button>
+            <button type="button" class="tiny-btn" onclick={setSearchStartFromCurrent}>Use current</button>
+          </div>
+          {#if roots.length > 0}
+            <div class="roots row">
+              {#each roots as root}
+                <button type="button" class="root-btn" onclick={() => jumpToRoot(root)}>{root}</button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
         <div class="dir-browser">
           <div class="dir-header">
             <span class="dir-path" title={currentPath}>{currentPath || "/"}</span>
@@ -212,6 +309,28 @@
         {#if worktrees.loading}
           <div class="status-msg">Loading...</div>
         {:else}
+          <div class="path-tools stack">
+            <label class="path-label" for="worktree-root-input">New worktree root (optional)</label>
+            <div class="path-input-row row">
+              <input
+                id="worktree-root-input"
+                class="path-input"
+                type="text"
+                bind:value={worktreeRootDir}
+                placeholder="D:\\codex-worktrees or /Volumes/worktrees"
+              />
+              <button type="button" class="tiny-btn" onclick={setWorktreeRootFromCurrent}>Use current</button>
+            </div>
+            <label class="path-label" for="worktree-path-input">Exact new worktree path (optional)</label>
+            <input
+              id="worktree-path-input"
+              class="path-input"
+              type="text"
+              bind:value={newWorktreePath}
+              placeholder="D:\\codex-worktrees\\repo\\branch-name"
+            />
+          </div>
+
           <ul class="worktree-list">
             {#each worktrees.worktrees as wt}
               <li class="worktree-item" class:selected={wt.path === worktrees.selectedWorktreePath}>
@@ -354,6 +473,66 @@
     padding: var(--space-md);
     overflow-y: auto;
     flex: 1;
+  }
+
+  .path-tools {
+    --stack-gap: var(--space-xs);
+  }
+
+  .path-label {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--cli-text-muted);
+  }
+
+  .path-input-row {
+    --row-gap: var(--space-xs);
+    align-items: center;
+  }
+
+  .path-input {
+    flex: 1;
+    min-width: 0;
+    padding: var(--space-xs) var(--space-sm);
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-sm);
+    background: var(--cli-bg);
+    color: var(--cli-text);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+
+  .path-input:focus {
+    outline: none;
+    border-color: var(--cli-prefix-agent);
+  }
+
+  .roots {
+    --row-gap: var(--space-xs);
+    flex-wrap: wrap;
+  }
+
+  .root-btn,
+  .tiny-btn {
+    padding: 0.3rem 0.5rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--cli-border);
+    background: transparent;
+    color: var(--cli-text-dim);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .root-btn:hover,
+  .tiny-btn:hover {
+    color: var(--cli-text);
+    border-color: var(--cli-text-muted);
   }
 
   /* Directory browser (step 1) */

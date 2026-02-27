@@ -84,14 +84,19 @@ class WorktreesStore {
     this.projectPath = trimmed;
   }
 
-  async create(baseRef?: string) {
+  async create(options?: { baseRef?: string; path?: string; rootDir?: string }) {
     if (!this.repoRoot) return;
     this.mutating = true;
     this.error = null;
     try {
+      const baseRef = options?.baseRef?.trim();
+      const path = options?.path?.trim();
+      const rootDir = options?.rootDir?.trim();
       const created = await socket.gitWorktreeCreate({
         repoRoot: this.repoRoot,
-        ...(baseRef?.trim() ? { baseRef: baseRef.trim() } : {}),
+        ...(baseRef ? { baseRef } : {}),
+        ...(path ? { path } : {}),
+        ...(rootDir ? { rootDir } : {}),
       });
       await this.#loadWorktrees(this.repoRoot, created.path);
       this.selectedWorktreePath = created.path;

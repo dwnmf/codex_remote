@@ -2,11 +2,12 @@
 set -euo pipefail
 
 # ── Codex Remote Installer ──────────────────────────────
-# Usage: curl -fsSL https://raw.githubusercontent.com/cospec-ai/codex-remote/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.sh | bash
 
 CODEX_REMOTE_HOME="${CODEX_REMOTE_HOME:-$HOME/.codex-remote}"
-CODEX_REMOTE_REPO="${CODEX_REMOTE_REPO:-https://github.com/cospec-ai/codex-remote.git}"
+CODEX_REMOTE_REPO="${CODEX_REMOTE_REPO:-https://github.com/dwnmf/codex_remote.git}"
 CODEX_REMOTE_BRANCH="${CODEX_REMOTE_BRANCH:-}"
+CODEX_REMOTE_RUN_SELF_HOST="${CODEX_REMOTE_RUN_SELF_HOST:-0}"
 
 # ── Colors ──────────────────────────────────────
 RED='\033[0;31m'
@@ -24,14 +25,6 @@ step()  { printf "\n${BOLD}%s${RESET}\n" "$1"; }
 abort() {
   printf "\n${RED}Error: %s${RESET}\n" "$1"
   exit 1
-}
-
-confirm() {
-  local prompt="$1"
-  [[ -r /dev/tty ]] || abort "Interactive setup requires a TTY."
-  printf "%s [Y/n] " "$prompt"
-  read -r answer < /dev/tty
-  [[ -z "$answer" || "$answer" =~ ^[Yy] ]]
 }
 
 retry() {
@@ -132,19 +125,19 @@ fi
 if command -v bun &>/dev/null; then
   pass "bun $(bun --version)"
 else
-  warn "bun not found"
-  if confirm "  Install bun?"; then
-    curl -fsSL https://bun.sh/install | bash
-    # Source bun into current shell
-    export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
-    export PATH="$BUN_INSTALL/bin:$PATH"
-    if command -v bun &>/dev/null; then
-      pass "bun installed ($(bun --version))"
-    else
-      abort "Failed to install bun. Install manually: https://bun.sh"
-    fi
+  warn "bun not found. Installing automatically..."
+  if ! command -v curl &>/dev/null; then
+    abort "curl is required to install bun automatically. Install curl and rerun."
+  fi
+  retry 3 3 "bun install" bash -c 'curl -fsSL https://bun.sh/install | bash' \
+    || abort "Failed to install bun automatically. Install manually: https://bun.sh"
+  # Source bun into current shell
+  export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+  export PATH="$BUN_INSTALL/bin:$PATH"
+  if command -v bun &>/dev/null; then
+    pass "bun installed ($(bun --version))"
   else
-    abort "bun is required. Install it from https://bun.sh"
+    abort "Failed to add bun to PATH. Restart terminal and rerun installer."
   fi
 fi
 
@@ -157,15 +150,13 @@ else
   echo "  The codex CLI is required to run Codex Remote."
   echo ""
   if command -v brew &>/dev/null; then
-    if confirm "  Install codex via Homebrew?"; then
-      brew install codex
-      if command -v codex &>/dev/null; then
-        pass "codex installed"
-      else
-        abort "Failed to install codex."
-      fi
+    info "  Installing codex via Homebrew..."
+    retry 3 3 "codex install" brew install codex \
+      || abort "Failed to install codex via Homebrew."
+    if command -v codex &>/dev/null; then
+      pass "codex installed"
     else
-      abort "codex is required. Install it manually: https://github.com/openai/codex"
+      abort "Failed to install codex."
     fi
   else
     echo "  Install codex manually and re-run this script."
@@ -180,17 +171,12 @@ echo "  Checking codex authentication..."
 if codex login status &>/dev/null; then
   pass "codex authenticated"
 else
-  warn "codex is not authenticated"
-  echo ""
-  echo "  Please run 'codex login' to authenticate, then re-run this script."
-  echo ""
-  if confirm "  Run 'codex login' now?"; then
-    codex login
-    if codex login status &>/dev/null; then
-      pass "codex authenticated"
-    else
-      warn "codex authentication may have failed. You can try again later."
-    fi
+  warn "codex is not authenticated. Launching 'codex login'..."
+  codex login
+  if codex login status &>/dev/null; then
+    pass "codex authenticated"
+  else
+    abort "codex authentication failed. Complete 'codex login' and rerun installer."
   fi
 fi
 
@@ -290,13 +276,13 @@ if [[ ! -f "$local_wizard" ]]; then
   warn "Self-host wizard not found at $local_wizard"
   ensure_env_file
   warn "Run 'codex-remote self-host' after installation."
-elif confirm "  Run self-host deployment now?"; then
+elif [[ "$CODEX_REMOTE_RUN_SELF_HOST" == "1" ]]; then
   printf "  ${DIM}Deploying to your Cloudflare account...${RESET}\n"
   # shellcheck source=/dev/null
   source "$local_wizard"
 else
   ensure_env_file
-  echo "  Skipped cloud deployment. Run 'codex-remote self-host' when you're ready."
+  echo "  Skipped cloud deployment. Set CODEX_REMOTE_RUN_SELF_HOST=1 to run it during install."
 fi
 
 # ── Done ────────────────────────────────────────
