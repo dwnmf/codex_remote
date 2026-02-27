@@ -37,6 +37,13 @@
 
     const threadId = $derived(route.params.id);
     const selectedModelOption = $derived(models.options.find((option) => option.value === model) ?? null);
+    const threadShortId = $derived(threadId ? threadId.slice(0, 8) : "--------");
+    const threadStatusLabel = $derived.by(() => {
+        if (socket.status === "connected") return "Live";
+        if (socket.status === "connecting") return "Connecting";
+        if (socket.status === "reconnecting") return "Reconnecting";
+        return "Offline";
+    });
 
 
     $effect(() => {
@@ -294,6 +301,10 @@
 
 </script>
 
+<svelte:head>
+    <title>Thread {threadShortId} — Codex Remote</title>
+</svelte:head>
+
 <div class="thread-page stack">
     <AppHeader
         status={socket.status}
@@ -309,111 +320,255 @@
         {/snippet}
     </AppHeader>
 
-    <div class="transcript" bind:this={container}>
-        {#if messages.current.length === 0}
-            <div class="empty row">
-                <span class="empty-prompt">&gt;</span>
-                <span class="empty-text">No messages yet. Start a conversation.</span>
-            </div>
-        {:else}
-            {#each messages.current as message (message.id)}
-                {#if message.role === "approval" && message.approval}
-                    <ApprovalPrompt
-                        approval={message.approval}
-                        onApprove={(forSession) => messages.approve(
-                            message.approval!.id,
-                            forSession,
-                            model.trim() ? threads.resolveCollaborationMode(mode, model.trim(), reasoningEffort) : undefined,
-                        )}
-                        onDecline={() => messages.decline(
-                            message.approval!.id,
-                            model.trim() ? threads.resolveCollaborationMode(mode, model.trim(), reasoningEffort) : undefined,
-                        )}
-                        onCancel={() => messages.cancel(message.approval!.id)}
-                    />
-                {:else if message.kind === "user-input-request" && message.userInputRequest}
-                    <UserInputPrompt
-                        request={message.userInputRequest}
-                        onSubmit={(answers) => messages.respondToUserInput(
-                            message.id,
-                            answers,
-                            model.trim() ? threads.resolveCollaborationMode(mode, model.trim(), reasoningEffort) : undefined,
-                        )}
-                    />
-                {:else if message.kind === "plan"}
-                    <PlanCard
-                        {message}
-                        disabled={(messages.turnStatus ?? "").toLowerCase() === "inprogress" || !socket.isHealthy}
-                        latest={message.id === lastPlanId}
-                        onApprove={() => handlePlanApprove(message.id)}
-                    />
-                {:else}
-                    <MessageBlock {message} />
-                {/if}
-            {/each}
+    <main class="thread-main">
+        <section class="thread-shell stack">
+            <header class="thread-masthead">
+                <span class="thread-kicker">Thread workspace</span>
+                <h1 class="thread-title">
+                    <span class="thread-title-main">DIALOGUE</span>
+                    <span class="thread-title-sub">session {threadShortId}</span>
+                </h1>
+                <div class="thread-meta row">
+                    <span class="meta-chip">{threadStatusLabel}</span>
+                    <span class="meta-sep">·</span>
+                    <span class="meta-label">mode {mode}</span>
+                    <span class="meta-sep">·</span>
+                    <span class="meta-label">sandbox {sandbox}</span>
+                </div>
+            </header>
 
-            {#if messages.isReasoningStreaming}
-                <div class="streaming-reasoning">
-                    <Reasoning
-                        content={messages.streamingReasoningText}
-                        isStreaming={true}
-                        defaultOpen={true}
+            <section class="thread-console stack">
+                <div class="transcript" bind:this={container}>
+                    {#if messages.current.length === 0}
+                        <div class="empty stack">
+                            <span class="empty-word">BEGIN</span>
+                            <p class="empty-text">No messages yet. Write the first prompt to start this session.</p>
+                        </div>
+                    {:else}
+                        {#each messages.current as message (message.id)}
+                            {#if message.role === "approval" && message.approval}
+                                <ApprovalPrompt
+                                    approval={message.approval}
+                                    onApprove={(forSession) => messages.approve(
+                                        message.approval!.id,
+                                        forSession,
+                                        model.trim() ? threads.resolveCollaborationMode(mode, model.trim(), reasoningEffort) : undefined,
+                                    )}
+                                    onDecline={() => messages.decline(
+                                        message.approval!.id,
+                                        model.trim() ? threads.resolveCollaborationMode(mode, model.trim(), reasoningEffort) : undefined,
+                                    )}
+                                    onCancel={() => messages.cancel(message.approval!.id)}
+                                />
+                            {:else if message.kind === "user-input-request" && message.userInputRequest}
+                                <UserInputPrompt
+                                    request={message.userInputRequest}
+                                    onSubmit={(answers) => messages.respondToUserInput(
+                                        message.id,
+                                        answers,
+                                        model.trim() ? threads.resolveCollaborationMode(mode, model.trim(), reasoningEffort) : undefined,
+                                    )}
+                                />
+                            {:else if message.kind === "plan"}
+                                <PlanCard
+                                    {message}
+                                    disabled={(messages.turnStatus ?? "").toLowerCase() === "inprogress" || !socket.isHealthy}
+                                    latest={message.id === lastPlanId}
+                                    onApprove={() => handlePlanApprove(message.id)}
+                                />
+                            {:else}
+                                <MessageBlock {message} />
+                            {/if}
+                        {/each}
+
+                        {#if messages.isReasoningStreaming}
+                            <div class="streaming-reasoning">
+                                <Reasoning
+                                    content={messages.streamingReasoningText}
+                                    isStreaming={true}
+                                    defaultOpen={true}
+                                />
+                            </div>
+                        {/if}
+
+                        {#if (messages.turnStatus ?? "").toLowerCase() === "inprogress" && !messages.isReasoningStreaming}
+                            <WorkingStatus
+                                detail={messages.statusDetail ?? messages.planExplanation}
+                                plan={messages.plan}
+                                startTime={turnStartTime}
+                            />
+                        {/if}
+                    {/if}
+
+                    {#if sendError || (socket.status !== "connected" && socket.status !== "connecting" && socket.error)}
+                        <div class="connection-error row">
+                            <span class="error-icon row">!</span>
+                            <span class="error-text">{sendError || socket.error}</span>
+                            {#if socket.status === "reconnecting"}
+                                <span class="error-hint">Reconnecting automatically...</span>
+                            {:else if socket.status === "error" || socket.status === "disconnected"}
+                                <button type="button" class="retry-btn" onclick={() => socket.reconnect()}>
+                                    Retry
+                                </button>
+                            {/if}
+                        </div>
+                    {/if}
+                </div>
+
+                <div class="composer">
+                    <PromptInput
+                        {model}
+                        {reasoningEffort}
+                        {mode}
+                        modelOptions={models.options}
+                        modelsLoading={models.status === "loading"}
+                        disabled={(messages.turnStatus ?? "").toLowerCase() === "inprogress" || !socket.isHealthy}
+                        onStop={(messages.turnStatus ?? "").toLowerCase() === "inprogress" ? handleStop : undefined}
+                        onSubmit={handleSubmit}
+                        onModelChange={(v) => model = v}
+                        onReasoningChange={(v) => reasoningEffort = v}
+                        onModeChange={(v) => { modeUserOverride = true; mode = v; }}
                     />
                 </div>
-            {/if}
-
-            {#if (messages.turnStatus ?? "").toLowerCase() === "inprogress" && !messages.isReasoningStreaming}
-                <WorkingStatus
-                    detail={messages.statusDetail ?? messages.planExplanation}
-                    plan={messages.plan}
-                    startTime={turnStartTime}
-                />
-            {/if}
-        {/if}
-
-        {#if sendError || (socket.status !== "connected" && socket.status !== "connecting" && socket.error)}
-            <div class="connection-error row">
-                <span class="error-icon row">!</span>
-                <span class="error-text">{sendError || socket.error}</span>
-                {#if socket.status === "reconnecting"}
-                    <span class="error-hint">Reconnecting automatically...</span>
-                {:else if socket.status === "error" || socket.status === "disconnected"}
-                    <button type="button" class="retry-btn" onclick={() => socket.reconnect()}>
-                        Retry
-                    </button>
-                {/if}
-            </div>
-        {/if}
-    </div>
-
-    <PromptInput
-        {model}
-        {reasoningEffort}
-        {mode}
-        modelOptions={models.options}
-        modelsLoading={models.status === "loading"}
-        disabled={(messages.turnStatus ?? "").toLowerCase() === "inprogress" || !socket.isHealthy}
-        onStop={(messages.turnStatus ?? "").toLowerCase() === "inprogress" ? handleStop : undefined}
-        onSubmit={handleSubmit}
-        onModelChange={(v) => model = v}
-        onReasoningChange={(v) => reasoningEffort = v}
-        onModeChange={(v) => { modeUserOverride = true; mode = v; }}
-    />
+            </section>
+        </section>
+    </main>
 </div>
 
 <style>
     .thread-page {
         --stack-gap: 0;
-        height: 100%;
+        min-height: 100vh;
         background: var(--cli-bg);
     }
 
-    /* Transcript */
+    .thread-main {
+        flex: 1;
+        display: flex;
+        justify-content: center;
+        padding: var(--space-md) var(--space-lg);
+    }
+
+    .thread-shell {
+        --stack-gap: var(--space-sm);
+        width: 100%;
+        max-width: min(1480px, calc(100vw - var(--space-lg) * 2));
+        animation: threadFadeUp 0.28s ease;
+    }
+
+    .thread-masthead {
+        display: grid;
+        gap: 0.28rem;
+        padding: 0.22rem 0;
+    }
+
+    .thread-kicker {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        text-transform: uppercase;
+        letter-spacing: 0.11em;
+        color: var(--cli-text-muted);
+    }
+
+    .thread-title {
+        margin: 0;
+        display: grid;
+        gap: 0.12rem;
+    }
+
+    .thread-title-main {
+        font-family: var(--font-display);
+        font-size: clamp(2.4rem, 8vw, 5.8rem);
+        line-height: 0.82;
+        text-transform: uppercase;
+        letter-spacing: -0.015em;
+        color: var(--cli-text);
+    }
+
+    .thread-title-sub {
+        font-family: var(--font-editorial);
+        font-size: clamp(1.06rem, 2vw, 1.64rem);
+        font-style: italic;
+        color: var(--cli-text-dim);
+        letter-spacing: 0.006em;
+    }
+
+    .thread-meta {
+        --row-gap: var(--space-xs);
+        flex-wrap: wrap;
+        color: var(--cli-text-muted);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+    }
+
+    .meta-chip {
+        padding: 0.16rem 0.42rem;
+        border: 1px solid color-mix(in srgb, var(--cli-border) 54%, transparent);
+        border-radius: 999px;
+        color: var(--cli-prefix-agent);
+        background: color-mix(in srgb, var(--cli-prefix-agent) 10%, transparent);
+    }
+
+    .meta-sep {
+        color: var(--cli-border);
+    }
+
+    .meta-label {
+        color: var(--cli-text-dim);
+    }
+
+    .thread-console {
+        --stack-gap: 0;
+        border: 1px solid color-mix(in srgb, var(--cli-border) 72%, transparent);
+        border-radius: var(--radius-lg);
+        background:
+            linear-gradient(
+                180deg,
+                color-mix(in srgb, var(--cli-bg-elevated) 90%, transparent),
+                color-mix(in srgb, var(--cli-bg) 92%, transparent)
+            );
+        overflow: hidden;
+        min-height: min(72vh, 980px);
+    }
+
+    :global(:root[data-theme="light"]) .thread-console {
+        box-shadow: var(--shadow-md);
+    }
+
     .transcript {
         flex: 1;
         overflow-y: auto;
         overflow-x: hidden;
-        padding: var(--space-sm) 0;
+        min-height: 18rem;
+        padding: var(--space-sm) 0 var(--space-md);
+        background: transparent;
+    }
+
+    .composer {
+        border-top: 1px solid color-mix(in srgb, var(--cli-border) 70%, transparent);
+        background: color-mix(in srgb, var(--cli-bg-elevated) 86%, transparent);
+    }
+
+    .composer :global(.prompt-input) {
+        padding: 0;
+    }
+
+    .composer :global(.input-container) {
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        background: transparent;
+    }
+
+    .composer :global(.input-container:focus-within) {
+        transform: none;
+        box-shadow: none;
+    }
+
+    .composer :global(textarea) {
+        min-height: 3.6rem;
     }
 
     .streaming-reasoning {
@@ -421,26 +576,34 @@
     }
 
     .empty {
-        --row-gap: var(--space-sm);
-        padding: var(--space-xl) var(--space-md);
-        font-family: var(--font-mono);
-        font-size: var(--text-sm);
+        --stack-gap: var(--space-xs);
+        align-items: flex-start;
+        padding: clamp(2rem, 8vh, 4rem) var(--space-md);
     }
 
-    .empty-prompt {
-        color: var(--cli-prefix-agent);
+    .empty-word {
+        font-family: var(--font-display);
+        font-size: clamp(2rem, 7vw, 3.8rem);
+        line-height: 0.86;
+        letter-spacing: -0.01em;
+        color: color-mix(in srgb, var(--cli-text) 82%, transparent);
     }
 
     .empty-text {
-        color: var(--cli-text-muted);
+        margin: 0;
+        max-width: 42ch;
+        color: var(--cli-text-dim);
+        font-family: var(--font-editorial);
+        font-size: 1rem;
+        line-height: 1.45;
     }
 
     .connection-error {
         --row-gap: var(--space-sm);
-        margin: var(--space-sm) var(--space-md);
+        margin: var(--space-md) var(--space-md) 0;
         padding: var(--space-sm) var(--space-md);
         background: var(--cli-error-bg);
-        border: 1px solid var(--cli-error);
+        border: 1px solid color-mix(in srgb, var(--cli-error) 56%, transparent);
         border-radius: var(--radius-md);
         font-family: var(--font-mono);
         font-size: var(--text-sm);
@@ -484,6 +647,35 @@
     .retry-btn:hover {
         background: var(--cli-error);
         color: white;
+    }
+
+    @keyframes threadFadeUp {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    @media (max-width: 900px) {
+        .thread-main {
+            padding: var(--space-md);
+        }
+
+        .thread-shell {
+            max-width: 100%;
+        }
+
+        .thread-title-main {
+            font-size: clamp(2rem, 14vw, 3.6rem);
+        }
+
+        .thread-console {
+            min-height: calc(100vh - 13rem);
+        }
     }
 
 </style>
