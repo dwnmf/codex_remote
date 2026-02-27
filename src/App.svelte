@@ -4,6 +4,7 @@
   import { connectionManager } from "./lib/connection-manager.svelte";
   import { auth } from "./lib/auth.svelte";
   import { socket } from "./lib/socket.svelte";
+  import "./lib/theme.svelte";
   import "./router";
 
   $effect(() => {

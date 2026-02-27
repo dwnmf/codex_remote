@@ -40,31 +40,52 @@
     </header>
 
     <main class="hero stack">
-      <div class="hero-copy stack">
-        <h1>
-          <span class="hero-word">REMOTE</span>
-          <span class="hero-caption"><span class="hero-editorial">(Codex workflows)</span> from any browser</span>
-        </h1>
-        <p>
-          Codex Remote lets you start and supervise Codex CLI sessions running on your machine from any browser.
-        </p>
-        {#if isLocalMode && !hasConfiguredUrl}
-          <div class="hero-actions row">
-            <a class="primary-btn" href="/settings">Configure Anchor URL</a>
+      <div class="hero-grid">
+        <div class="hero-copy stack">
+          <h1>
+            <span class="hero-kicker">Remote coding control</span>
+            <span class="hero-word">REMOTE</span>
+            <span class="hero-caption"><span class="hero-script">Codex workflows</span> from any browser</span>
+          </h1>
+          <p>
+            Codex Remote lets you start and supervise Codex CLI sessions running on your machine from any browser.
+          </p>
+          {#if isLocalMode && !hasConfiguredUrl}
+            <div class="hero-actions row">
+              <a class="primary-btn" href="/settings">Configure Anchor URL</a>
+            </div>
+            <p class="local-mode-hint">Local mode active - no sign-in required</p>
+          {:else if isLocalMode && hasConfiguredUrl}
+            <div class="hero-actions row">
+              <a class="primary-btn" href="/app">Go to app</a>
+              <a class="ghost-btn" href="/settings">Settings</a>
+            </div>
+            <p class="local-mode-hint">Local mode active - no sign-in required</p>
+          {:else if !isSignedIn}
+            <div class="hero-actions row">
+              <a class="primary-btn" href="/login">Sign in</a>
+              <a class="ghost-btn" href="/register">Create account</a>
+            </div>
+          {/if}
+        </div>
+
+        <aside class="hero-visual" aria-label="Highlights">
+          <div class="visual-card">
+            <span class="visual-icon">◉</span>
+            <span class="visual-title">Live Stream</span>
+            <span class="visual-copy">Watch each turn as it happens.</span>
           </div>
-          <p class="local-mode-hint">Local mode active - no sign-in required</p>
-        {:else if isLocalMode && hasConfiguredUrl}
-          <div class="hero-actions row">
-            <a class="primary-btn" href="/app">Go to app</a>
-            <a class="ghost-btn" href="/settings">Settings</a>
+          <div class="visual-card">
+            <span class="visual-icon">◌</span>
+            <span class="visual-title">Approve Actions</span>
+            <span class="visual-copy">Confirm edits and commands remotely.</span>
           </div>
-          <p class="local-mode-hint">Local mode active - no sign-in required</p>
-        {:else if !isSignedIn}
-          <div class="hero-actions row">
-            <a class="primary-btn" href="/login">Sign in</a>
-            <a class="ghost-btn" href="/register">Create account</a>
+          <div class="visual-card">
+            <span class="visual-icon">◎</span>
+            <span class="visual-title">Multi Device</span>
+            <span class="visual-copy">Use desktop, tablet, or phone.</span>
           </div>
-        {/if}
+        </aside>
       </div>
     </main>
 
@@ -102,13 +123,15 @@
   }
 
   .landing-frame {
+    --landing-line: color-mix(in srgb, var(--cli-border) 42%, transparent);
     --stack-gap: 0;
     max-width: min(1480px, calc(100vw - var(--space-md) * 2));
     margin: 0 auto;
-    border: 1px solid var(--cli-border);
+    border: 1px solid var(--landing-line);
     border-radius: var(--radius-lg);
     background: var(--cli-bg-elevated);
     overflow: hidden;
+    box-shadow: var(--shadow-md);
   }
 
   .landing-header {
@@ -116,7 +139,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 0.64rem 0.8rem;
-    border-bottom: 1px solid var(--cli-border);
+    border-bottom: 1px solid var(--landing-line);
   }
 
   .header-actions {
@@ -144,6 +167,7 @@
     font-family: var(--font-editorial);
     font-size: 1rem;
     font-style: italic;
+    font-weight: 500;
     color: var(--cli-text-dim);
   }
 
@@ -170,43 +194,61 @@
     align-items: flex-start;
     text-align: left;
     padding: clamp(1.1rem, 4vw, 2.8rem) var(--space-md) var(--space-md);
-    border-bottom: 1px solid var(--cli-border);
+    border-bottom: 1px solid var(--landing-line);
+  }
+
+  .hero-grid {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+    gap: clamp(var(--space-md), 2.6vw, var(--space-xl));
+    align-items: start;
   }
 
   .hero-copy {
-    max-width: 980px;
+    max-width: 760px;
     --stack-gap: var(--space-md);
   }
 
   .hero h1 {
     margin: 0;
     display: grid;
-    gap: 0.1rem;
-    line-height: 0.82;
+    gap: 0.18rem;
+    line-height: 0.9;
     text-wrap: balance;
   }
 
-  .hero-word {
-    font-family: var(--font-display);
-    font-size: clamp(3.8rem, 15vw, 9rem);
+  .hero-kicker {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
     text-transform: uppercase;
-    letter-spacing: -0.01em;
-    line-height: 0.84;
+    letter-spacing: 0.1em;
+    color: var(--cli-text-muted);
+  }
+
+  .hero-word {
+    font-family: var(--font-editorial);
+    font-style: italic;
+    font-weight: 700;
+    font-size: clamp(3.1rem, 11vw, 6.8rem);
+    text-transform: uppercase;
+    letter-spacing: -0.018em;
+    line-height: 0.86;
     color: var(--cli-text);
   }
 
   .hero-caption {
     font-family: var(--font-sans);
-    font-size: clamp(1.6rem, 4vw, 2.6rem);
-    line-height: 1.02;
-    letter-spacing: -0.012em;
+    font-size: clamp(1.28rem, 2.5vw, 1.82rem);
+    line-height: 1.12;
+    letter-spacing: -0.006em;
     color: var(--cli-text-dim);
   }
 
-  .hero-editorial {
+  .hero-script {
     font-family: var(--font-editorial);
     font-style: italic;
-    font-weight: 400;
+    font-weight: 500;
     color: var(--cli-text);
   }
 
@@ -215,8 +257,50 @@
     color: var(--cli-text-dim);
     max-width: 620px;
     line-height: 1.5;
-    font-size: var(--text-base);
+    font-size: 1.03rem;
     font-family: var(--font-sans);
+    letter-spacing: 0.003em;
+  }
+
+  .hero-visual {
+    display: grid;
+    gap: var(--space-sm);
+  }
+
+  .visual-card {
+    display: grid;
+    gap: 0.2rem;
+    padding: 0.92rem 0.96rem;
+    border-radius: var(--radius-md);
+    border: 1px solid color-mix(in srgb, var(--cli-border) 36%, transparent);
+    background:
+      linear-gradient(
+        165deg,
+        color-mix(in srgb, var(--cli-bg-elevated) 88%, var(--color-text-inverse)),
+        color-mix(in srgb, var(--cli-bg) 80%, transparent)
+      );
+  }
+
+  .visual-icon {
+    font-family: var(--font-mono);
+    color: var(--cli-prefix-agent);
+    font-size: 0.76rem;
+    letter-spacing: 0.1em;
+  }
+
+  .visual-title {
+    font-family: var(--font-sans);
+    font-size: 1.08rem;
+    font-weight: 700;
+    letter-spacing: 0.004em;
+    color: var(--cli-text);
+  }
+
+  .visual-copy {
+    font-family: var(--font-sans);
+    font-size: 0.9rem;
+    color: var(--cli-text-dim);
+    line-height: 1.35;
   }
 
   .hero-actions {
@@ -279,22 +363,27 @@
   .feature {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: 0.35rem;
     min-height: 7.5rem;
-    padding: 0;
-    border: none;
-    border-radius: 0;
-    background: transparent;
+    padding: 0.88rem 0.92rem;
+    border: 1px solid color-mix(in srgb, var(--cli-border) 34%, transparent);
+    border-radius: var(--radius-md);
+    background:
+      linear-gradient(
+        170deg,
+        color-mix(in srgb, var(--cli-bg-elevated) 90%, var(--color-text-inverse)),
+        color-mix(in srgb, var(--cli-bg) 84%, transparent)
+      );
     box-shadow: none;
   }
 
   .feature-label {
-    font-family: var(--font-display);
-    font-size: 1.9rem;
+    font-family: var(--font-sans);
+    font-size: 1.54rem;
     text-transform: uppercase;
-    letter-spacing: 0.025em;
+    letter-spacing: -0.008em;
     color: var(--cli-text);
-    font-weight: 500;
+    font-weight: 800;
   }
 
   .feature-index {
@@ -308,9 +397,9 @@
   .feature p {
     margin: 0;
     color: var(--cli-text-dim);
-    line-height: 1.5;
+    line-height: 1.42;
     font-family: var(--font-sans);
-    font-size: 1rem;
+    font-size: 1.02rem;
     letter-spacing: 0.004em;
   }
 
@@ -335,6 +424,18 @@
   @media (max-width: 900px) {
     .landing {
       padding: var(--space-sm);
+    }
+
+    .hero-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .hero-visual {
+      grid-template-columns: 1fr;
+    }
+
+    .hero p {
+      font-size: 1.04rem;
     }
 
     .features {

@@ -59,7 +59,7 @@
     min-height: calc(100vh - var(--space-md) * 2);
     max-width: min(1480px, calc(100vw - var(--space-md) * 2));
     margin: 0 auto;
-    border: 1px solid var(--cli-border);
+    border: 1px solid color-mix(in srgb, var(--cli-border) 72%, transparent);
     border-radius: var(--radius-lg);
     background: var(--cli-bg-elevated);
     overflow: hidden;
@@ -172,7 +172,12 @@
     align-items: flex-start;
     justify-content: flex-start;
     padding: var(--space-xl);
-    background: color-mix(in srgb, var(--cli-bg) 76%, transparent);
+    background:
+      linear-gradient(
+        160deg,
+        color-mix(in srgb, var(--cli-bg-elevated) 88%, var(--color-text-inverse)),
+        color-mix(in srgb, var(--cli-bg) 84%, transparent)
+      );
     border-left: 1px solid var(--cli-border);
     position: relative;
     overflow: hidden;

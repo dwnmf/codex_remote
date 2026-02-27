@@ -22,6 +22,14 @@ body {
   font-feature-settings: "liga" 1, "kern" 1, "calt" 1;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
 #app {
   height: 100%;
 }
