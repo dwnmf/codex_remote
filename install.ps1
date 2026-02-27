@@ -33,6 +33,16 @@ function Test-Tool([string]$Name) {
   return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Resolve-CodexCommand() {
+  foreach ($name in @("codex.cmd", "codex.exe", "codex")) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd -and $cmd.Source) {
+      return [string]$cmd.Source
+    }
+  }
+  return ""
+}
+
 function Invoke-Retry([int]$Attempts, [int]$DelaySeconds, [string]$Description, [scriptblock]$Action) {
   for ($i = 1; $i -le $Attempts; $i++) {
     try {
@@ -341,17 +351,22 @@ else {
 }
 
 Ensure-CommandViaWinget "codex" "OpenAI.Codex" "Install manually: https://github.com/openai/codex"
+$codexCommand = Resolve-CodexCommand
+if (-not $codexCommand) {
+  Abort "codex command not found after installation."
+}
+Write-Pass "Using codex command: $codexCommand"
 
 Write-Host ""
 Write-Host "  Checking codex authentication..."
-& codex login status > $null 2>&1
+& $codexCommand login status > $null 2>&1
 if ($LASTEXITCODE -eq 0) {
   Write-Pass "codex authenticated"
 }
 else {
   Write-WarnLine "codex is not authenticated. Launching 'codex login'..."
-  & codex login
-  & codex login status > $null 2>&1
+  & $codexCommand login
+  & $codexCommand login status > $null 2>&1
   if ($LASTEXITCODE -eq 0) {
     Write-Pass "codex authenticated"
   }
