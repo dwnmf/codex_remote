@@ -2,7 +2,6 @@
   import { socket } from "../lib/socket.svelte";
   import { threads } from "../lib/threads.svelte";
   import { theme } from "../lib/theme.svelte";
-  import { navigate } from "../router";
   import AppHeader from "../lib/components/AppHeader.svelte";
   import ShimmerDot from "../lib/components/ShimmerDot.svelte";
 
@@ -66,14 +65,7 @@
         <ul class="session-list">
           {#each threads.list as thread (thread.id)}
             <li class="session-item row">
-              <a
-                class="session-link row"
-                href="/thread/{thread.id}"
-                onclick={(event) => {
-                  event.preventDefault();
-                  navigate("/thread/:id", { params: { id: thread.id } });
-                }}
-              >
+              <a class="session-link row" href="/thread/{thread.id}">
                 <span class="session-icon">›</span>
                 <span class="session-preview">{thread.preview || "New session"}</span>
                 <span class="session-meta">{formatTime(thread.createdAt)}</span>

@@ -2,7 +2,6 @@
   import { createEventDispatcher } from "svelte";
   import type { ThreadInfo } from "../types";
   import ShimmerDot from "./ShimmerDot.svelte";
-  import { navigate } from "../../router";
 
   interface Props {
     loading: boolean;
@@ -47,14 +46,7 @@
         <ul class="recent-list">
           {#each recentThreads as thread (thread.id)}
             <li>
-              <a
-                class="recent-item split"
-                href="/thread/{thread.id}"
-                onclick={(event) => {
-                  event.preventDefault();
-                  navigate("/thread/:id", { params: { id: thread.id } });
-                }}
-              >
+              <a class="recent-item split" href="/thread/{thread.id}">
                 <span class="recent-preview">{thread.preview || "New session"}</span>
                 <span class="recent-time">{formatTime(thread.createdAt)}</span>
               </a>

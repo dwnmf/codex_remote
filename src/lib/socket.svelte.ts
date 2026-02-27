@@ -274,7 +274,7 @@ class SocketStore {
   }
 
   artifactsList(threadId: string, anchorId?: string): Promise<OrbitArtifactsListResult> {
-    return this.#requestRpc<OrbitArtifactsListResult>(
+    return this.#requestOrbitControl<OrbitArtifactsListResult>(
       "orbit.artifacts.list",
       {
         threadId,
@@ -285,7 +285,7 @@ class SocketStore {
   }
 
   multiDispatch(payload: OrbitMultiDispatchPayload): Promise<Record<string, unknown>> {
-    return this.#requestRpc<Record<string, unknown>>(
+    return this.#requestOrbitControl<Record<string, unknown>>(
       "orbit.multi-dispatch",
       payload as unknown as Record<string, unknown>,
       "orbit-multi-dispatch",
@@ -442,6 +442,25 @@ class SocketStore {
         reject,
       });
       const result = this.send({ id, method, params });
+      if (!result.success) {
+        this.#consumePendingRpc(id);
+        reject(new Error(result.error ?? "Not connected"));
+      }
+    });
+  }
+
+  #requestOrbitControl<T>(type: string, payload: Record<string, unknown>, idPrefix: string): Promise<T> {
+    const id = `${idPrefix}-${++this.#rpcIdCounter}`;
+    return new Promise((resolve, reject) => {
+      this.#registerPendingRpc(id, {
+        resolve: (value) => resolve(value as T),
+        reject,
+      });
+      const result = this.#sendRaw({
+        type,
+        id,
+        ...payload,
+      });
       if (!result.success) {
         this.#consumePendingRpc(id);
         reject(new Error(result.error ?? "Not connected"));

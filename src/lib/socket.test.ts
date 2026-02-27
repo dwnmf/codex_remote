@@ -91,10 +91,10 @@ describe("socket rpc helpers", () => {
     ws.open();
 
     const promise = socket.artifactsList("thread-1");
-    const request = JSON.parse(ws.sent[0]) as { id: string; method: string; params: Record<string, unknown> };
+    const request = JSON.parse(ws.sent[0]) as { id: string; type: string; threadId: string };
 
-    expect(request.method).toBe("orbit.artifacts.list");
-    expect(request.params.threadId).toBe("thread-1");
+    expect(request.type).toBe("orbit.artifacts.list");
+    expect(request.threadId).toBe("thread-1");
 
     ws.emitMessage({
       type: "orbit.artifacts",
