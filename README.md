@@ -1,194 +1,168 @@
 # Codex Remote
 
-Codex Remote lets you monitor and control [Codex CLI](https://github.com/openai/codex) sessions running on your Mac from your phone, tablet, or any browser. Start tasks, watch real-time output, approve file writes, and review diffs from a handheld web client while your agent runs locally.
+`Codex Remote` позволяет запускать и контролировать сессии `Codex CLI` на вашем компьютере с телефона, планшета или любого браузера.
 
-<img src="docs/assets/demo.gif" alt="Codex Remote demo" width="320" />
+Вы можете:
+- запускать задачи удалённо;
+- смотреть поток вывода агента в реальном времени;
+- подтверждать/отклонять действия (например, запись файлов);
+- просматривать диффы до применения изменений.
 
-## Features
+<img src="docs/assets/demo.gif" alt="Демо Codex Remote" width="320" />
 
-- **Start tasks remotely** -- kick off Codex sessions from your phone
-- **Live streaming** -- watch agent output, reasoning, and diffs in real-time
-- **Approve or deny** -- handle permission prompts from anywhere
-- **Review diffs** -- inspect code changes per turn before they land
-- **Plan mode** -- review and approve plans before the agent writes code
-- **Push notifications** -- get notified on your phone for approvals and important session events
-- **No port forwarding** -- Anchor connects outbound to Cloudflare; no open ports on your Mac
-- **Passkey auth** -- WebAuthn passkeys, no passwords
-- **Self-host first** -- run Orbit and Pages in your own Cloudflare account
+## Что это такое
 
-## How it works
+Codex Remote состоит из трёх частей:
+- `Anchor` (локально): запускает `codex app-server` и передаёт команды/события.
+- `Orbit` (в облаке): ретрансляция WebSocket, аутентификация, push-уведомления.
+- `Web client` (в браузере): интерфейс управления сессиями.
 
+Схема:
+
+```text
+Телефон / Браузер
+        |
+        | HTTPS + WebSocket
+        v
+Orbit (Cloudflare)
+        ^
+        | WebSocket
+        v
+Anchor (локально)
+        |
+        | JSON-RPC over stdio
+        v
+codex app-server
 ```
-   Phone / Browser
-         |
-         | HTTPS + WebSocket
-         ↓
-   Orbit (Cloudflare Workers)
-         ↑
-         | WebSocket
-         ↓
-   Anchor (local daemon)
-         |
-         | JSON-RPC over stdio
-         ↓
-   Codex app-server
-```
 
-**Anchor** is a lightweight daemon on your Mac that spawns `codex app-server` and relays structured JSON-RPC messages. **Orbit** is a Cloudflare Worker + Durable Object that handles passkey auth, push notification fan-out, and WebSocket relay between your devices and Anchor. The **web client** is a static Svelte app on Cloudflare Pages.
+## Для кого
 
-## Quick start
+- Для разработчиков, которые запускают Codex локально и хотят контролировать его удалённо.
+- Для команд, где нужно быстро согласовывать действия агента без доступа к ноутбуку.
+- Для тех, кому важен self-hosting и контроль своей инфраструктуры.
 
-### Requirements
+## Ключевые возможности
 
-- macOS or Linux for `install.sh`
-- Windows for `install.ps1`
-- [Bun](https://bun.sh) runtime
-- [Codex CLI](https://github.com/openai/codex) installed and authenticated
+- Удалённый запуск задач в Codex CLI.
+- Live-поток ответов и событий сессии.
+- Подтверждение опасных операций из браузера.
+- Просмотр диффов по каждому шагу.
+- Поддержка passkey (WebAuthn) в облачном режиме.
+- Push-уведомления (при self-host настройке).
+- Локальный режим без Cloudflare (для доверенной сети).
 
-### Install
+## Быстрый старт
+
+### 1) Требования
+
+- `Codex CLI` установлен и авторизован (`codex login`).
+- `Bun` установлен.
+- `git` установлен.
+- Для self-host режима: аккаунт Cloudflare + `wrangler` CLI.
+
+### 2) Установка
 
 macOS / Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cospec-ai/codex-remote/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.sh | bash
 ```
 
 Windows (PowerShell):
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/cospec-ai/codex-remote/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.ps1 | iex
 ```
 
-The installer now prompts whether to run self-host deployment immediately or skip and run it later.
-
-### Run
-
-```bash
-codex-remote start
-```
-
-If you skipped deployment during install, run:
+### 3) Первый запуск
 
 ```bash
 codex-remote self-host
 codex-remote start
 ```
 
-On first run:
+Что произойдёт:
+1. Откроется авторизация устройства.
+2. Вы входите через passkey.
+3. Anchor подключается к Orbit.
+4. Веб-интерфейс готов к удалённому управлению.
 
-1. A device code appears in your terminal.
-2. A browser window opens for authentication.
-3. You sign in with your passkey.
-4. Anchor connects to Orbit and is ready for commands from the web client.
+## Режимы работы
 
-This path deploys and uses your own Cloudflare account, and is the current generally available setup. Managed Orbit access is currently waitlist-only.
+### Self-host (рекомендуется)
 
-### One-command local run (FastAPI + web + anchor)
+- Полный контроль над инфраструктурой в вашем Cloudflare.
+- Аутентификация и уведомления работают из коробки после `codex-remote self-host`.
 
-For local development without Cloudflare:
+### Local mode (без Cloudflare)
+
+Подходит для доверенной сети (LAN, Tailscale, WireGuard), когда облако не нужно.
+
+Запуск Anchor:
+
+```bash
+cd services/anchor
+bun install
+ANCHOR_ORBIT_URL="" bun run dev
+```
+
+Запуск веб-клиента:
+
+```bash
+bun install
+bun run dev -- --host 0.0.0.0
+```
+
+После этого откройте `http://<ваш-ip>:5173`.
+
+Важно: в local mode нет встроенной аутентификации. Используйте только в доверенной сети.
+
+## Команды CLI
+
+| Команда | Описание |
+|---|---|
+| `codex-remote start` | Запуск Anchor |
+| `codex-remote login` | Повторная авторизация устройства |
+| `codex-remote doctor` | Проверка окружения и конфигурации |
+| `codex-remote config` | Открыть `.env` в редакторе |
+| `codex-remote update` | Обновить код и зависимости |
+| `codex-remote self-host` | Мастер self-host развёртывания |
+| `codex-remote uninstall` | Удалить Codex Remote |
+| `codex-remote version` | Показать версию |
+| `codex-remote help` | Справка по командам |
+
+## Локальная разработка
+
+Быстрые команды:
+
+```bash
+bun run lint
+bun run test
+bun run ci:local
+```
+
+Запуск полного локального стека (frontend + FastAPI control-plane + anchor):
 
 ```bash
 bun run dev:all
 ```
 
-This reads `.env` and starts all three services in one terminal:
-- FastAPI control-plane on `http://localhost:8080`
-- Web client on `http://localhost:5173`
-- Anchor bridge connected to `ws://localhost:8080/ws/anchor`
+По умолчанию:
+- frontend: `http://localhost:5173`
+- backend: `http://localhost:8080`
 
-## Local Mode (No Cloudflare)
+## Документация
 
-If your devices are on a trusted private network (e.g., Tailscale, WireGuard, or LAN), you can skip Cloudflare entirely and connect directly to Anchor.
+- [Установка](docs/installation.md)
+- [Self-hosting](docs/self-hosting.md)
+- [Архитектура](docs/architecture.md)
+- [Аутентификация](docs/auth.md)
+- [События и протокол](docs/events.md)
+- [Безопасность](docs/security.md)
+- [FastAPI control-plane](docs/fastapi-control-plane.md)
+- [Структура репозитория](docs/repo-structure.md)
+- [Vision](docs/vision.md)
 
-```
-   Phone / Browser
-         |
-         | WebSocket (no auth)
-         ↓
-   Anchor (local daemon)
-         |
-         | JSON-RPC over stdio
-         ↓
-   Codex app-server
-```
-
-### Setup
-
-1. **Run Anchor without Orbit:**
-
-   ```bash
-   cd services/anchor
-   bun install
-   ANCHOR_ORBIT_URL="" bun run dev
-   ```
-
-2. **Run the web frontend:**
-
-   ```bash
-   bun install
-   bun dev -- --host 0.0.0.0
-   ```
-
-3. **Access from your device:**
-
-   Open `http://<your-ip>:5173/` in your browser. Local mode activates automatically when no `AUTH_URL` is configured — no sign-in required.
-
-4. **Configure the Anchor URL:**
-
-   In Settings, enter: `ws://<your-ip>:8788/ws`
-
-### When to use local mode
-
-- **Tailscale / WireGuard** — devices on encrypted mesh network
-- **Local development** — testing without Cloudflare deployment
-- **Air-gapped environments** — no external network access
-
-> **Security note:** Local mode has no authentication. Only use on networks you trust.
-
-## FastAPI Control Plane (Vercel + FastAPI)
-
-If you want a lighter self-host stack (without Cloudflare Workers/Durable Objects), use the FastAPI service in [`services/control-plane`](services/control-plane/README.md).
-
-High-level setup:
-
-1. Deploy frontend (static build) to Vercel with:
-   - `AUTH_URL=https://<your-fastapi-domain>`
-   - `AUTH_MODE=basic`
-2. Run FastAPI control-plane (`/auth/*`, `/ws/client`, `/ws/anchor`).
-3. Run Anchor with:
-   - `ANCHOR_ORBIT_URL=wss://<your-fastapi-domain>/ws/anchor`
-   - `AUTH_URL=https://<your-fastapi-domain>`
-
-## CLI
-
-| Command | Description |
-|---------|-------------|
-| `codex-remote start` | Start the Anchor service |
-| `codex-remote login` | Re-authenticate |
-| `codex-remote doctor` | Check prerequisites and configuration |
-| `codex-remote config` | Open `.env` in your editor |
-| `codex-remote update` | Pull latest and reinstall |
-| `codex-remote self-host` | Deploy to your own Cloudflare account |
-| `codex-remote uninstall` | Remove Codex Remote |
-
-## Documentation
-
-| Doc | Description |
-|-----|-------------|
-| [Installation](docs/installation.md) | Detailed install and setup guide |
-| [Self-Hosting](docs/self-hosting.md) | Deploy to your own Cloudflare account |
-| [Architecture](docs/architecture.md) | System design, components, and data flows |
-| [Auth](docs/auth.md) | Passkey authentication and JWT details |
-| [Events](docs/events.md) | JSON-RPC protocol reference |
-| [Security](docs/security.md) | Threat model and security controls |
-| [FastAPI Control Plane](docs/fastapi-control-plane.md) | Lightweight self-host stack (Vercel + FastAPI + Anchor) |
-| [Repo Structure](docs/repo-structure.md) | Project directory layout |
-| [Vision](docs/vision.md) | Product vision and design principles |
-
-## Contributing
-
-Contributions are welcome. Please open an issue first to discuss what you'd like to change.
-
-## License
+## Лицензия
 
 [MIT](LICENSE)
