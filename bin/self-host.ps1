@@ -5,20 +5,20 @@ $ErrorActionPreference = "Stop"
 
 $script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:RepoRoot = Split-Path -Parent $script:ScriptDir
-$script:ZaneHome = if ($env:ZANE_HOME) {
-  $env:ZANE_HOME
+$script:CodexRemoteHome = if ($env:CODEX_REMOTE_HOME) {
+  $env:CODEX_REMOTE_HOME
 }
 elseif (Test-Path (Join-Path $script:RepoRoot "services/orbit")) {
   $script:RepoRoot
 }
 else {
-  Join-Path $HOME ".zane"
+  Join-Path $HOME ".codex-remote"
 }
-$script:EnvFile = Join-Path $script:ZaneHome ".env"
-$script:OrbitDir = Join-Path $script:ZaneHome "services/orbit"
-$script:RootWranglerToml = Join-Path $script:ZaneHome "wrangler.toml"
+$script:EnvFile = Join-Path $script:CodexRemoteHome ".env"
+$script:OrbitDir = Join-Path $script:CodexRemoteHome "services/orbit"
+$script:RootWranglerToml = Join-Path $script:CodexRemoteHome "wrangler.toml"
 $script:OrbitWranglerToml = Join-Path $script:OrbitDir "wrangler.toml"
-$script:MigrationsDir = Join-Path $script:ZaneHome "migrations"
+$script:MigrationsDir = Join-Path $script:CodexRemoteHome "migrations"
 
 function Write-Step([string]$Message) {
   Write-Host ""
@@ -201,7 +201,7 @@ function Get-OrCreateDatabaseId() {
   try {
     $dbList = $dbListJson | ConvertFrom-Json
     if ($dbList) {
-      $existing = $dbList | Where-Object { $_.name -eq "zane" } | Select-Object -First 1
+      $existing = $dbList | Where-Object { $_.name -eq "codex-remote" } | Select-Object -First 1
       if ($existing) {
         $dbId = $existing.uuid
       }
@@ -215,9 +215,9 @@ function Get-OrCreateDatabaseId() {
     return $dbId
   }
 
-  $createOutput = (& wrangler d1 create zane 2>&1 | Out-String)
+  $createOutput = (& wrangler d1 create codex-remote 2>&1 | Out-String)
   if ($LASTEXITCODE -ne 0) {
-    Abort "Could not create D1 database 'zane'. Output:`n$createOutput"
+    Abort "Could not create D1 database 'codex-remote'. Output:`n$createOutput"
   }
 
   $uuidMatch = [regex]::Match($createOutput, "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -229,7 +229,7 @@ function Get-OrCreateDatabaseId() {
   if ($LASTEXITCODE -eq 0) {
     try {
       $retryList = $retryListJson | ConvertFrom-Json
-      $created = $retryList | Where-Object { $_.name -eq "zane" } | Select-Object -First 1
+      $created = $retryList | Where-Object { $_.name -eq "codex-remote" } | Select-Object -First 1
       if ($created) {
         return $created.uuid
       }
@@ -295,7 +295,7 @@ function Deploy-Orbit() {
 }
 
 Write-Step "0. Validating local setup"
-if (-not (Test-Path $script:ZaneHome)) { Abort "ZANE_HOME not found: $script:ZaneHome" }
+if (-not (Test-Path $script:CodexRemoteHome)) { Abort "CODEX_REMOTE_HOME not found: $script:CodexRemoteHome" }
 if (-not (Test-Path $script:OrbitDir)) { Abort "Orbit service not found at $script:OrbitDir" }
 if (-not (Test-Path $script:RootWranglerToml)) { Abort "Missing $script:RootWranglerToml" }
 if (-not (Test-Path $script:OrbitWranglerToml)) { Abort "Missing $script:OrbitWranglerToml" }
@@ -335,15 +335,15 @@ Write-Step "4. Generating secrets"
 $webJwtSecret = (& openssl rand -base64 32).Trim()
 $anchorJwtSecret = (& openssl rand -base64 32).Trim()
 $vapid = Generate-VapidKeys
-$vapidSubject = "mailto:admin@zane.invalid"
-Write-Pass "ZANE_WEB_JWT_SECRET generated"
-Write-Pass "ZANE_ANCHOR_JWT_SECRET generated"
+$vapidSubject = "mailto:admin@codex-remote.invalid"
+Write-Pass "CODEX_REMOTE_WEB_JWT_SECRET generated"
+Write-Pass "CODEX_REMOTE_ANCHOR_JWT_SECRET generated"
 Write-Pass "VAPID keypair generated"
 
 Write-Step "5. Running database migrations"
-Push-Location $script:ZaneHome
+Push-Location $script:CodexRemoteHome
 try {
-  & wrangler d1 migrations apply zane --remote
+  & wrangler d1 migrations apply codex-remote --remote
 }
 finally {
   Pop-Location
@@ -365,8 +365,8 @@ finally {
 $orbitOutput = Deploy-Orbit
 Write-Host $orbitOutput
 
-Set-OrbitSecret "ZANE_WEB_JWT_SECRET" $webJwtSecret
-Set-OrbitSecret "ZANE_ANCHOR_JWT_SECRET" $anchorJwtSecret
+Set-OrbitSecret "CODEX_REMOTE_WEB_JWT_SECRET" $webJwtSecret
+Set-OrbitSecret "CODEX_REMOTE_ANCHOR_JWT_SECRET" $anchorJwtSecret
 
 $orbitUrl = Extract-Url $orbitOutput "https://[^\s]+\.workers\.dev"
 if (-not (Is-HttpsUrl $orbitUrl)) {
@@ -377,7 +377,7 @@ Write-Pass "Orbit worker deployed: $orbitUrl"
 $orbitWsUrl = ($orbitUrl -replace "^https://", "wss://") + "/ws/anchor"
 
 Write-Step "7. Building and deploying web frontend"
-Push-Location $script:ZaneHome
+Push-Location $script:CodexRemoteHome
 try {
   Invoke-Retry 3 3 "Web dependency install" { & bun install --silent }
 }
@@ -386,7 +386,7 @@ finally {
 }
 
 Invoke-WithEnv @{ AUTH_URL = $orbitUrl; VAPID_PUBLIC_KEY = $vapid.Public; AUTH_MODE = "passkey" } {
-  Push-Location $script:ZaneHome
+  Push-Location $script:CodexRemoteHome
   try {
     & bun run build
   }
@@ -399,9 +399,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Invoke-WithEnv @{ CI = "true" } {
-  Push-Location $script:ZaneHome
+  Push-Location $script:CodexRemoteHome
   try {
-    & wrangler pages project create zane --production-branch main | Out-Null
+    & wrangler pages project create codex-remote --production-branch main | Out-Null
   }
   finally {
     Pop-Location
@@ -413,9 +413,9 @@ if ($LASTEXITCODE -eq 0) {
 
 $pagesOutput = ""
 Invoke-WithEnv @{ CI = "true" } {
-  Push-Location $script:ZaneHome
+  Push-Location $script:CodexRemoteHome
   try {
-    $script:pagesOutput = (& wrangler pages deploy dist --project-name zane --commit-dirty=true 2>&1 | Out-String)
+    $script:pagesOutput = (& wrangler pages deploy dist --project-name codex-remote --commit-dirty=true 2>&1 | Out-String)
   }
   finally {
     Pop-Location
@@ -457,7 +457,7 @@ Write-Pass "Orbit redeployed"
 
 Write-Step "9. Configuring anchor"
 $envContent = @(
-  "# Zane Anchor Configuration (self-host)"
+  "# Codex Remote Anchor Configuration (self-host)"
   "ANCHOR_PORT=8788"
   "ANCHOR_ORBIT_URL=$orbitWsUrl"
   "AUTH_URL=$orbitUrl"
@@ -479,4 +479,4 @@ Write-Host "  Orbit: $orbitUrl"
 Write-Host ""
 Write-Host "  Next steps:"
 Write-Host "    1. Open $pagesUrl and create your account"
-Write-Host "    2. Run zane start"
+Write-Host "    2. Run codex-remote start"

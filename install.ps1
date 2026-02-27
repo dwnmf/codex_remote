@@ -3,9 +3,9 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ZaneHome = if ($env:ZANE_HOME) { $env:ZANE_HOME } else { Join-Path $HOME ".zane" }
-$ZaneRepo = if ($env:ZANE_REPO) { $env:ZANE_REPO } else { "https://github.com/cospec-ai/zane.git" }
-$ZaneBranch = if ($env:ZANE_BRANCH) { $env:ZANE_BRANCH } else { "" }
+$CodexRemoteHome = if ($env:CODEX_REMOTE_HOME) { $env:CODEX_REMOTE_HOME } else { Join-Path $HOME ".codex-remote" }
+$CodexRemoteRepo = if ($env:CODEX_REMOTE_REPO) { $env:CODEX_REMOTE_REPO } else { "https://github.com/cospec-ai/codex-remote.git" }
+$CodexRemoteBranch = if ($env:CODEX_REMOTE_BRANCH) { $env:CODEX_REMOTE_BRANCH } else { "" }
 
 function Write-Step([string]$Message) {
   Write-Host ""
@@ -68,8 +68,8 @@ function Ensure-EnvFile([string]$HomePath) {
   }
 
   @(
-    "# Zane Anchor Configuration (self-host)"
-    "# Run 'zane self-host' to complete setup."
+    "# Codex Remote Anchor Configuration (self-host)"
+    "# Run 'codex-remote self-host' to complete setup."
     "ANCHOR_PORT=8788"
     "ANCHOR_ORBIT_URL="
     "AUTH_URL="
@@ -119,7 +119,7 @@ function Ensure-Path([string]$TargetDir) {
 }
 
 Write-Host ""
-Write-Host "Zane Installer (Windows)" -ForegroundColor Cyan
+Write-Host "Codex Remote Installer (Windows)" -ForegroundColor Cyan
 Write-Host ""
 
 if (-not $IsWindows) {
@@ -203,64 +203,64 @@ else {
   }
 }
 
-Write-Step "Installing Zane to $ZaneHome..."
+Write-Step "Installing Codex Remote to $CodexRemoteHome..."
 
-if (Test-Path (Join-Path $ZaneHome ".git")) {
+if (Test-Path (Join-Path $CodexRemoteHome ".git")) {
   Write-Host "  Existing installation found. Updating..."
 
-  $localStatus = (& git -C $ZaneHome status --porcelain).Trim()
+  $localStatus = (& git -C $CodexRemoteHome status --porcelain).Trim()
   if ($localStatus) {
     Write-WarnLine "Local changes detected and will be overwritten."
   }
 
-  Invoke-Retry 3 3 "git fetch" { & git -C $ZaneHome fetch --prune origin }
+  Invoke-Retry 3 3 "git fetch" { & git -C $CodexRemoteHome fetch --prune origin }
 
-  $targetBranch = $ZaneBranch
+  $targetBranch = $CodexRemoteBranch
   if (-not $targetBranch) {
-    $remoteHead = (& git -C $ZaneHome symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null).Trim()
+    $remoteHead = (& git -C $CodexRemoteHome symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null).Trim()
     $targetBranch = if ($remoteHead) { $remoteHead -replace "^origin/", "" } else { "main" }
   }
 
-  & git -C $ZaneHome show-ref --verify --quiet "refs/remotes/origin/$targetBranch"
+  & git -C $CodexRemoteHome show-ref --verify --quiet "refs/remotes/origin/$targetBranch"
   if ($LASTEXITCODE -ne 0) {
     Abort "Remote branch origin/$targetBranch not found."
   }
 
-  $before = (& git -C $ZaneHome rev-parse --short HEAD 2>$null).Trim()
+  $before = (& git -C $CodexRemoteHome rev-parse --short HEAD 2>$null).Trim()
   if (-not $before) { $before = "unknown" }
 
-  & git -C $ZaneHome reset --hard --quiet "origin/$targetBranch"
+  & git -C $CodexRemoteHome reset --hard --quiet "origin/$targetBranch"
   if ($LASTEXITCODE -ne 0) {
     Abort "Failed to reset repository."
   }
-  & git -C $ZaneHome clean -fd --quiet
+  & git -C $CodexRemoteHome clean -fd --quiet
   if ($LASTEXITCODE -ne 0) {
     Abort "Failed to clean repository."
   }
 
-  $after = (& git -C $ZaneHome rev-parse --short HEAD 2>$null).Trim()
+  $after = (& git -C $CodexRemoteHome rev-parse --short HEAD 2>$null).Trim()
   if (-not $after) { $after = "unknown" }
   Write-Pass "Updated $before -> $after (origin/$targetBranch)"
 }
 else {
-  if (Test-Path $ZaneHome) {
-    $backup = "$ZaneHome.bak.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
-    Write-WarnLine "$ZaneHome exists but is not a git repo. Backing up to $backup"
-    Move-Item $ZaneHome $backup
+  if (Test-Path $CodexRemoteHome) {
+    $backup = "$CodexRemoteHome.bak.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+    Write-WarnLine "$CodexRemoteHome exists but is not a git repo. Backing up to $backup"
+    Move-Item $CodexRemoteHome $backup
   }
 
-  if ($ZaneBranch) {
-    Invoke-Retry 3 3 "git clone" { & git clone --depth 1 --branch $ZaneBranch $ZaneRepo $ZaneHome }
+  if ($CodexRemoteBranch) {
+    Invoke-Retry 3 3 "git clone" { & git clone --depth 1 --branch $CodexRemoteBranch $CodexRemoteRepo $CodexRemoteHome }
   }
   else {
-    Invoke-Retry 3 3 "git clone" { & git clone --depth 1 $ZaneRepo $ZaneHome }
+    Invoke-Retry 3 3 "git clone" { & git clone --depth 1 $CodexRemoteRepo $CodexRemoteHome }
   }
   Write-Pass "Cloned repository"
 }
 
 Write-Host "  Installing anchor dependencies..."
 Invoke-Retry 3 3 "Anchor dependency install" {
-  Push-Location (Join-Path $ZaneHome "services/anchor")
+  Push-Location (Join-Path $CodexRemoteHome "services/anchor")
   try {
     & bun install --silent
   }
@@ -272,39 +272,39 @@ Write-Pass "Anchor dependencies installed"
 
 Write-Step "Installing CLI..."
 
-$binDir = Join-Path $ZaneHome "bin"
-if (-not (Test-Path (Join-Path $binDir "zane.ps1"))) {
-  Abort "CLI script not found: $(Join-Path $binDir 'zane.ps1')"
+$binDir = Join-Path $CodexRemoteHome "bin"
+if (-not (Test-Path (Join-Path $binDir "codex-remote.ps1"))) {
+  Abort "CLI script not found: $(Join-Path $binDir 'codex-remote.ps1')"
 }
-if (-not (Test-Path (Join-Path $binDir "zane.cmd"))) {
-  Abort "CLI wrapper not found: $(Join-Path $binDir 'zane.cmd')"
+if (-not (Test-Path (Join-Path $binDir "codex-remote.cmd"))) {
+  Abort "CLI wrapper not found: $(Join-Path $binDir 'codex-remote.cmd')"
 }
 
 Ensure-Path $binDir
 
-Ensure-EnvFile $ZaneHome
+Ensure-EnvFile $CodexRemoteHome
 
 Write-Step "Self-host setup"
 $selfHostScript = Join-Path $binDir "self-host.ps1"
 if (-not (Test-Path $selfHostScript)) {
   Write-WarnLine "Self-host wizard not found at $selfHostScript"
-  Write-WarnLine "Run 'zane self-host' after installation."
+  Write-WarnLine "Run 'codex-remote self-host' after installation."
 }
 elseif (Confirm-Yes "Run self-host deployment now?") {
   & $selfHostScript
 }
 else {
-  Write-Host "  Skipped cloud deployment. Run 'zane self-host' when ready."
+  Write-Host "  Skipped cloud deployment. Run 'codex-remote self-host' when ready."
 }
 
 Write-Host ""
-Write-Host "Zane installed successfully!" -ForegroundColor Green
+Write-Host "Codex Remote installed successfully!" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Get started:"
-Write-Host "    zane start     Start the anchor service"
-Write-Host "    zane doctor    Check your setup"
-Write-Host "    zane config    Edit configuration"
-Write-Host "    zane help      See all commands"
+Write-Host "    codex-remote start     Start the anchor service"
+Write-Host "    codex-remote doctor    Check your setup"
+Write-Host "    codex-remote config    Edit configuration"
+Write-Host "    codex-remote help      See all commands"
 Write-Host ""
 Write-Host "  If this is a new terminal session, reopen PowerShell to refresh PATH."
 Write-Host ""

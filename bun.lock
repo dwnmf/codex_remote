@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "zane",
+      "name": "codex-remote",
       "dependencies": {
         "@pierre/diffs": "^1.0.6",
         "@simplewebauthn/browser": "^11.0.0",

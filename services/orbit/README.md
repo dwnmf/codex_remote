@@ -25,19 +25,19 @@ Orbit expects a passkey session JWT from its auth endpoints:
 - `Authorization: Bearer <jwt>` header, or
 - `?token=<jwt>` query param (for browsers)
 
-For Anchor service-to-service auth, set `ZANE_ANCHOR_JWT_SECRET` and use a JWT with:
+For Anchor service-to-service auth, set `CODEX_REMOTE_ANCHOR_JWT_SECRET` and use a JWT with:
 
-- `iss: "zane-anchor"`
-- `aud: "zane-orbit-anchor"`
+- `iss: "codex-remote-anchor"`
+- `aud: "codex-remote-orbit-anchor"`
 
 ## D1 setup
 
 Setup:
 
-1. Create a D1 database (example name `zane-orbit`).
+1. Create a D1 database (example name `codex-remote-orbit`).
 2. Update `wrangler.toml` with the real `database_id`.
 3. Apply migrations:
 
 ```bash
-bunx wrangler d1 migrations apply zane-orbit --remote
+bunx wrangler d1 migrations apply codex-remote-orbit --remote
 ```

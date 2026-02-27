@@ -2,7 +2,7 @@
 
 | Guide | Description |
 |-------|-------------|
-| [Installation](installation.md) | Install Zane and get started |
+| [Installation](installation.md) | Install Codex Remote and get started |
 | [Self-Hosting](self-hosting.md) | Deploy to your own Cloudflare account |
 | [Architecture](architecture.md) | System design, components, and data flows |
 | [Auth](auth.md) | Passkey authentication and JWT details |

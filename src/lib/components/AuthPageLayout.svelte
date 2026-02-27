@@ -12,7 +12,7 @@
     <div class="login-left">
       <div class="login-form-wrapper">
         <header class="login-header">
-          <a class="brand" href="/">zane</a>
+          <a class="brand" href="/">codex-remote</a>
           <button type="button" class="icon-btn" onclick={() => theme.cycle()} title="Theme: {theme.current}">
             <span class="icon-glyph">{themeIcons[theme.current]}</span>
           </button>
@@ -23,7 +23,7 @@
         </div>
 
         <footer class="login-footer">
-          <a class="footer-link" href="https://github.com/cospec-ai/zane" target="_blank" rel="noopener">GitHub</a>
+          <a class="footer-link" href="https://github.com/cospec-ai/codex-remote" target="_blank" rel="noopener">GitHub</a>
         </footer>
       </div>
     </div>

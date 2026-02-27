@@ -1,1 +1,1 @@
-"""FastAPI control-plane package for Zane."""
+"""FastAPI control-plane package for Codex Remote."""

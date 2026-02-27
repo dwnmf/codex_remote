@@ -52,7 +52,7 @@
 </script>
 
 <svelte:head>
-  <title>Create account — Zane</title>
+  <title>Create account — Codex Remote</title>
 </svelte:head>
 
 <AuthPageLayout>

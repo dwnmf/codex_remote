@@ -26,7 +26,7 @@
 </script>
 
 <svelte:head>
-  <title>Zane · Sessions</title>
+  <title>Codex Remote · Sessions</title>
 </svelte:head>
 
 <div class="sessions stack">

@@ -2,7 +2,7 @@ import { auth } from "./auth.svelte";
 import { config } from "./config.svelte";
 import { socket } from "./socket.svelte";
 
-const STORE_KEY = "__zane_connection_manager__";
+const STORE_KEY = "__codex_remote_connection_manager__";
 
 class ConnectionManager {
   #paused = false;

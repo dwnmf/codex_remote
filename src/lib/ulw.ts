@@ -248,7 +248,7 @@ export class UlwRuntime {
   }
 }
 
-const STORE_KEY = "__zane_ulw_runtime__";
+const STORE_KEY = "__codex_remote_ulw_runtime__";
 
 function getRuntime(): UlwRuntime {
   const global = globalThis as Record<string, unknown>;
@@ -338,7 +338,7 @@ export class UlwLoopRunner {
   }
 }
 
-const RUNNER_KEY = "__zane_ulw_loop_runner__";
+const RUNNER_KEY = "__codex_remote_ulw_loop_runner__";
 
 function getRunner(): UlwLoopRunner {
   const global = globalThis as Record<string, unknown>;

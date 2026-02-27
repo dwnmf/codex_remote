@@ -1,7 +1,7 @@
 import { socket } from "./socket.svelte";
 
-const STORE_KEY = "__zane_anchors_store__";
-const SELECTED_STORAGE_KEY = "zane_selected_anchor_id";
+const STORE_KEY = "__codex_remote_anchors_store__";
+const SELECTED_STORAGE_KEY = "codex_remote_selected_anchor_id";
 const ANCHOR_CHECK_TIMEOUT_MS = 5_000;
 
 export interface AnchorInfo {

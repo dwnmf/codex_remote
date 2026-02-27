@@ -14,7 +14,7 @@ self.addEventListener("push", (event) => {
     return;
   }
 
-  const tag = `zane-${data.type}-${data.threadId || "global"}`;
+  const tag = `codex-remote-${data.type}-${data.threadId || "global"}`;
 
   event.waitUntil(
     self.registration.showNotification(data.title, {

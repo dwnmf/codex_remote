@@ -8,13 +8,13 @@ const PORT = Number(process.env.ANCHOR_PORT ?? 8788);
 const ORBIT_URL = process.env.ANCHOR_ORBIT_URL ?? "";
 const ANCHOR_JWT_TTL_SEC = Number(process.env.ANCHOR_JWT_TTL_SEC ?? 300);
 const AUTH_URL = process.env.AUTH_URL ?? "";
-const FORCE_LOGIN = process.env.ZANE_FORCE_LOGIN === "1";
-const CREDENTIALS_FILE = process.env.ZANE_CREDENTIALS_FILE ?? "";
+const FORCE_LOGIN = process.env.CODEX_REMOTE_FORCE_LOGIN === "1";
+const CREDENTIALS_FILE = process.env.CODEX_REMOTE_CREDENTIALS_FILE ?? "";
 const ANCHOR_WS_TOKEN = (process.env.ANCHOR_WS_TOKEN ?? "").trim();
 const ANCHOR_WS_ALLOW_PUBLIC = process.env.ANCHOR_WS_ALLOW_PUBLIC === "1";
 const startedAt = Date.now();
 
-let ZANE_ANCHOR_JWT_SECRET = "";
+let CODEX_REMOTE_ANCHOR_JWT_SECRET = "";
 let USER_ID: string | undefined;
 let ANCHOR_ACCESS_TOKEN = "";
 let ANCHOR_REFRESH_TOKEN = "";
@@ -283,7 +283,7 @@ async function handleGitWorktreeCreate(id: number | string, params: JsonObject |
     const repoName = basename(resolvedRepoRoot);
     const worktreePath = rawPath
       ? ensureAbsolutePath(rawPath, "path")
-      : normalizeAbsolutePath(`${homedir()}/.zane/worktrees/${repoName}/${branch}`);
+      : normalizeAbsolutePath(`${homedir()}/.codex-remote/worktrees/${repoName}/${branch}`);
 
     await mkdir(dirname(worktreePath), { recursive: true });
 
@@ -478,8 +478,8 @@ function initializeAppServer(): void {
     id: Date.now(),
     params: {
       clientInfo: {
-        name: "zane-anchor",
-        title: "Zane Anchor",
+        name: "codex-remote-anchor",
+        title: "Codex Remote Anchor",
         version: "dev",
       },
       capabilities: {
@@ -656,7 +656,7 @@ async function refreshAnchorAccessToken(): Promise<boolean> {
         anchorAccessToken: ANCHOR_ACCESS_TOKEN,
         anchorRefreshToken: ANCHOR_REFRESH_TOKEN,
         anchorAccessExpiresAtMs: ANCHOR_ACCESS_EXPIRES_AT_MS,
-        anchorJwtSecret: ZANE_ANCHOR_JWT_SECRET || undefined,
+        anchorJwtSecret: CODEX_REMOTE_ANCHOR_JWT_SECRET || undefined,
       });
     }
 
@@ -681,22 +681,22 @@ async function buildOrbitUrl(): Promise<string | null> {
     const url = new URL(ORBIT_URL);
     if (ANCHOR_ACCESS_TOKEN) {
       const ready = await ensureAnchorAccessToken();
-      if (ready || !ZANE_ANCHOR_JWT_SECRET) {
+      if (ready || !CODEX_REMOTE_ANCHOR_JWT_SECRET) {
         url.searchParams.set("token", ANCHOR_ACCESS_TOKEN);
         return url.toString();
       }
     }
-    if (ZANE_ANCHOR_JWT_SECRET) {
+    if (CODEX_REMOTE_ANCHOR_JWT_SECRET) {
       const now = Math.floor(Date.now() / 1000);
       const token = await signJwtHs256(
         {
-          iss: "zane-anchor",
-          aud: "zane-orbit-anchor",
+          iss: "codex-remote-anchor",
+          aud: "codex-remote-orbit-anchor",
           sub: USER_ID,
           iat: now,
           exp: now + ANCHOR_JWT_TTL_SEC,
         },
-        ZANE_ANCHOR_JWT_SECRET
+        CODEX_REMOTE_ANCHOR_JWT_SECRET
       );
       url.searchParams.set("token", token);
     }
@@ -1175,18 +1175,18 @@ async function deviceLogin(): Promise<boolean> {
             anchorAccessToken: ANCHOR_ACCESS_TOKEN,
             anchorRefreshToken: ANCHOR_REFRESH_TOKEN,
             anchorAccessExpiresAtMs: ANCHOR_ACCESS_EXPIRES_AT_MS,
-            anchorJwtSecret: ZANE_ANCHOR_JWT_SECRET || undefined,
+            anchorJwtSecret: CODEX_REMOTE_ANCHOR_JWT_SECRET || undefined,
           });
           console.log("  \x1b[32mAuthorised!\x1b[0m Device tokens saved.\n");
           return true;
         }
 
         if (tokenData.anchorJwtSecret) {
-          ZANE_ANCHOR_JWT_SECRET = tokenData.anchorJwtSecret;
+          CODEX_REMOTE_ANCHOR_JWT_SECRET = tokenData.anchorJwtSecret;
           await saveCredentials({
             userId: USER_ID,
             anchorId: ANCHOR_ID || undefined,
-            anchorJwtSecret: ZANE_ANCHOR_JWT_SECRET,
+            anchorJwtSecret: CODEX_REMOTE_ANCHOR_JWT_SECRET,
           });
           console.log("  \x1b[32mAuthorised!\x1b[0m Credentials saved.\n");
           return true;
@@ -1194,11 +1194,11 @@ async function deviceLogin(): Promise<boolean> {
       }
 
       // expired
-      console.error("  Code expired. Run 'zane login' to try again.");
+      console.error("  Code expired. Run 'codex-remote login' to try again.");
       return false;
     }
 
-    console.error("  Timed out. Run 'zane login' to try again.");
+    console.error("  Timed out. Run 'codex-remote login' to try again.");
     return false;
   } catch (err) {
     console.error("[anchor] device login failed", err);
@@ -1290,7 +1290,7 @@ ensureAppServer();
 async function startup() {
   const saved = await loadCredentials();
   if (saved) {
-    ZANE_ANCHOR_JWT_SECRET = saved.anchorJwtSecret ?? "";
+    CODEX_REMOTE_ANCHOR_JWT_SECRET = saved.anchorJwtSecret ?? "";
     ANCHOR_ACCESS_TOKEN = saved.anchorAccessToken ?? "";
     ANCHOR_REFRESH_TOKEN = saved.anchorRefreshToken ?? "";
     ANCHOR_ACCESS_EXPIRES_AT_MS = saved.anchorAccessExpiresAtMs ?? 0;
@@ -1307,16 +1307,16 @@ async function startup() {
         anchorAccessToken: ANCHOR_ACCESS_TOKEN || undefined,
         anchorRefreshToken: ANCHOR_REFRESH_TOKEN || undefined,
         anchorAccessExpiresAtMs: ANCHOR_ACCESS_EXPIRES_AT_MS || undefined,
-        anchorJwtSecret: ZANE_ANCHOR_JWT_SECRET || undefined,
+        anchorJwtSecret: CODEX_REMOTE_ANCHOR_JWT_SECRET || undefined,
       });
     }
   }
 
   const hasDeviceTokens = Boolean(ANCHOR_ACCESS_TOKEN && ANCHOR_REFRESH_TOKEN);
-  const hasLegacySecret = Boolean(ZANE_ANCHOR_JWT_SECRET);
+  const hasLegacySecret = Boolean(CODEX_REMOTE_ANCHOR_JWT_SECRET);
   const needsLogin = ORBIT_URL && (FORCE_LOGIN || !USER_ID || (!hasDeviceTokens && !hasLegacySecret));
 
-  console.log(`\nZane Anchor`);
+  console.log(`\nCodex Remote Anchor`);
   console.log(`  Local:     http://localhost:${server.port}`);
   console.log(`  WebSocket: ws://localhost:${server.port}/ws`);
   if (ANCHOR_WS_TOKEN) {
@@ -1341,7 +1341,7 @@ async function startup() {
     if (!preflight.ok) {
       if (preflight.kind === "auth") {
         console.error(`[anchor] Orbit authentication failed: ${preflight.detail}`);
-        console.error("[anchor] Run 'zane login' and then retry 'zane start'.");
+        console.error("[anchor] Run 'codex-remote login' and then retry 'codex-remote start'.");
         process.exit(1);
       }
       if (preflight.kind === "config") {

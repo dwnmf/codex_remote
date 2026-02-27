@@ -47,12 +47,12 @@ describe("totp unit", () => {
     const uri = buildTotpUri({
       secretBase32: secret,
       accountName: "alice",
-      issuer: "Zane",
+      issuer: "Codex Remote",
       digits: 6,
       periodSec: 30,
     });
     expect(uri.startsWith("otpauth://totp/")).toBe(true);
     expect(uri.includes("secret=" + secret)).toBe(true);
-    expect(uri.includes("issuer=Zane")).toBe(true);
+    expect(uri.includes("issuer=Codex+Remote")).toBe(true);
   });
 });

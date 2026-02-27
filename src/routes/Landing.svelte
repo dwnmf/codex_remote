@@ -12,13 +12,13 @@
 </script>
 
 <svelte:head>
-  <title>Zane</title>
+  <title>Codex Remote</title>
 </svelte:head>
 
 <div class="landing stack">
   <div class="landing-frame stack">
     <header class="landing-header">
-      <div class="brand">zane</div>
+      <div class="brand">codex-remote</div>
       <div class="header-actions">
         {#if pwa.canInstall && !pwa.isStandalone}
           <button class="ghost-btn" type="button" onclick={() => pwa.install()}>Install app</button>
@@ -40,7 +40,7 @@
       <div class="hero-copy stack">
         <h1>Remote</h1>
         <p>
-          Zane lets you start and supervise Codex CLI sessions running on your machine from any browser.
+          Codex Remote lets you start and supervise Codex CLI sessions running on your machine from any browser.
         </p>
         {#if isLocalMode && !hasConfiguredUrl}
           <div class="hero-actions row">
@@ -79,7 +79,7 @@
   </div>
 
   <footer class="landing-footer">
-    <a class="footer-link" href="https://github.com/cospec-ai/zane" target="_blank" rel="noopener">GitHub</a>
+    <a class="footer-link" href="https://github.com/cospec-ai/codex-remote" target="_blank" rel="noopener">GitHub</a>
   </footer>
 </div>
 

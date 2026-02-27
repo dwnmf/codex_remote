@@ -4,10 +4,10 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/types";
 
-const STORE_KEY = "__zane_auth_store__";
-const STORAGE_KEY = "zane_auth_token";
-const REFRESH_STORAGE_KEY = "zane_refresh_token";
-const LOCAL_MODE_KEY = "zane_local_mode";
+const STORE_KEY = "__codex_remote_auth_store__";
+const STORAGE_KEY = "codex_remote_auth_token";
+const REFRESH_STORAGE_KEY = "codex_remote_refresh_token";
+const LOCAL_MODE_KEY = "codex_remote_local_mode";
 const AUTH_BASE_URL = (import.meta.env.AUTH_URL ?? "").replace(/\/$/, "");
 const AUTH_MODE = (import.meta.env.AUTH_MODE ?? "passkey").toLowerCase();
 
@@ -357,7 +357,7 @@ class AuthStore {
         setupToken: data.setupToken,
         secret: data.secret,
         otpauthUrl: data.otpauthUrl,
-        issuer: data.issuer ?? "Zane",
+        issuer: data.issuer ?? "Codex Remote",
         digits: data.digits ?? 6,
         period: data.period ?? 30,
         username: name,

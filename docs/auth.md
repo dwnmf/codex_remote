@@ -12,8 +12,8 @@ This app uses passkeys and TOTP for user authentication, plus JWTs for service-t
 
 Two separate secrets are used:
 
-- `ZANE_WEB_JWT_SECRET` signs **user session** JWTs (issuer `zane-auth`, audience `zane-web`)
-- `ZANE_ANCHOR_JWT_SECRET` signs **Anchor** service JWTs (issuer `zane-anchor`, audience `zane-orbit-anchor`)
+- `CODEX_REMOTE_WEB_JWT_SECRET` signs **user session** JWTs (issuer `codex-remote-auth`, audience `codex-remote-web`)
+- `CODEX_REMOTE_ANCHOR_JWT_SECRET` signs **Anchor** service JWTs (issuer `codex-remote-anchor`, audience `codex-remote-orbit-anchor`)
 
 Orbit accepts either token depending on audience/issuer.
 
@@ -26,7 +26,7 @@ User JWTs are also stored server-side in `auth_sessions` for revocation and expi
 1) Web client calls Orbit auth endpoints to register or sign in:
    - `POST /auth/register/options` + `POST /auth/register/verify`
    - `POST /auth/login/options` + `POST /auth/login/verify`
-2) Orbit returns a JWT and a refresh token, both signed with `ZANE_WEB_JWT_SECRET`.
+2) Orbit returns a JWT and a refresh token, both signed with `CODEX_REMOTE_WEB_JWT_SECRET`.
 3) Client stores both tokens in `localStorage`.
 4) Orbit stores the session id (`jti`) in D1.
 5) When the JWT expires, the client calls `POST /auth/refresh` with the refresh token to get a new JWT and rotated refresh token.
@@ -49,20 +49,20 @@ User JWTs are also stored server-side in `auth_sessions` for revocation and expi
 2) A user code is displayed in the terminal and a browser opens.
 3) User enters the code on the web client, which calls `POST /auth/device/authorise`.
 4) Anchor polls `POST /auth/device/token` until authorised, then receives a JWT.
-5) Credentials are saved to `ZANE_CREDENTIALS_FILE` (default: `~/.zane/credentials.json`).
+5) Credentials are saved to `CODEX_REMOTE_CREDENTIALS_FILE` (default: `~/.codex-remote/credentials.json`).
 
 ### Web client to Orbit
 
 1) Client connects to Orbit WS using:
    - `wss://.../ws/client?token=<jwt>`
-2) Orbit verifies the JWT (issuer `zane-auth`, audience `zane-web`).
+2) Orbit verifies the JWT (issuer `codex-remote-auth`, audience `codex-remote-web`).
 
 ### Anchor to Orbit
 
-1) Anchor mints a short-lived JWT using `ZANE_ANCHOR_JWT_SECRET`.
+1) Anchor mints a short-lived JWT using `CODEX_REMOTE_ANCHOR_JWT_SECRET`.
 2) Anchor connects to:
    - `wss://.../ws/anchor?token=<jwt>`
-3) Orbit verifies the JWT (issuer `zane-anchor`, audience `zane-orbit-anchor`).
+3) Orbit verifies the JWT (issuer `codex-remote-anchor`, audience `codex-remote-orbit-anchor`).
 
 ### Anchor to app-server
 
@@ -75,14 +75,14 @@ User JWTs are also stored server-side in `auth_sessions` for revocation and expi
 
 Orbit auth:
 - `PASSKEY_ORIGIN`
-- `ZANE_WEB_JWT_SECRET`
+- `CODEX_REMOTE_WEB_JWT_SECRET`
 
 Orbit:
-- `ZANE_WEB_JWT_SECRET`
-- `ZANE_ANCHOR_JWT_SECRET` (required if Anchor connects remotely)
+- `CODEX_REMOTE_WEB_JWT_SECRET`
+- `CODEX_REMOTE_ANCHOR_JWT_SECRET` (required if Anchor connects remotely)
 
 Anchor:
-- `ZANE_ANCHOR_JWT_SECRET`
+- `CODEX_REMOTE_ANCHOR_JWT_SECRET`
 - `ANCHOR_ORBIT_URL`
 - `ANCHOR_APP_CWD` (optional, defaults to `process.cwd()`)
 

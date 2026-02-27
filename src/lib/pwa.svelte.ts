@@ -1,6 +1,6 @@
 import { navigate } from "../router";
 
-const STORE_KEY = "__zane_pwa_store__";
+const STORE_KEY = "__codex_remote_pwa_store__";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;

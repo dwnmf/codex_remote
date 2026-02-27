@@ -1,6 +1,6 @@
-# Installing Zane
+# Installing Codex Remote
 
-Zane runs a local Anchor service on your machine that connects to Orbit (the hosted control plane) so you can supervise Codex sessions remotely.
+Codex Remote runs a local Anchor service on your machine that connects to Orbit (the hosted control plane) so you can supervise Codex sessions remotely.
 
 ## Requirements
 
@@ -16,62 +16,62 @@ For a lighter backend alternative, see: [FastAPI Control Plane](fastapi-control-
 macOS / Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cospec-ai/zane/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/cospec-ai/codex-remote/main/install.sh | bash
 ```
 
 Windows (PowerShell):
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/cospec-ai/zane/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/cospec-ai/codex-remote/main/install.ps1 | iex
 ```
 
-This clones the repo to `~/.zane`, installs Anchor dependencies, adds `zane` to your PATH, and prompts whether to run `zane self-host` immediately.
+This clones the repo to `~/.codex-remote`, installs Anchor dependencies, adds `codex-remote` to your PATH, and prompts whether to run `codex-remote self-host` immediately.
 
 ### Build from source
 
 ```bash
-git clone https://github.com/cospec-ai/zane.git ~/.zane
-cd ~/.zane/services/anchor && bun install
+git clone https://github.com/cospec-ai/codex-remote.git ~/.codex-remote
+cd ~/.codex-remote/services/anchor && bun install
 ```
 
-Add `~/.zane/bin` to your PATH.
+Add `~/.codex-remote/bin` to your PATH.
 
 ## Setup
 
-1. If you skipped deployment during install, run `zane self-host`
-2. Run `zane start` (or `zane login` to re-authenticate)
+1. If you skipped deployment during install, run `codex-remote self-host`
+2. Run `codex-remote start` (or `codex-remote login` to re-authenticate)
 3. A device code is displayed in your terminal
 4. A browser window opens to enter the code
-5. Once authorised, credentials are saved to `~/.zane/credentials.json`
+5. Once authorised, credentials are saved to `~/.codex-remote/credentials.json`
 
 ## Running
 
 Start Anchor:
 ```bash
-zane start
+codex-remote start
 ```
 
-Anchor connects to Orbit and waits for commands from the web client. Open the Zane web app in your browser to start supervising sessions.
+Anchor connects to Orbit and waits for commands from the web client. Open the Codex Remote web app in your browser to start supervising sessions.
 
 ## CLI Commands
 
 | Command | Description |
 |---------|-------------|
-| `zane start` | Start the anchor service |
-| `zane login` | Re-authenticate with the web app |
-| `zane doctor` | Check prerequisites and configuration |
-| `zane config` | Open `.env` in your editor |
-| `zane update` | Pull latest code and reinstall dependencies |
-| `zane self-host` | Run the self-host setup wizard |
-| `zane uninstall` | Remove Zane from your system |
-| `zane version` | Print version |
-| `zane help` | Show help |
+| `codex-remote start` | Start the anchor service |
+| `codex-remote login` | Re-authenticate with the web app |
+| `codex-remote doctor` | Check prerequisites and configuration |
+| `codex-remote config` | Open `.env` in your editor |
+| `codex-remote update` | Pull latest code and reinstall dependencies |
+| `codex-remote self-host` | Run the self-host setup wizard |
+| `codex-remote uninstall` | Remove Codex Remote from your system |
+| `codex-remote version` | Print version |
+| `codex-remote help` | Show help |
 
 ## Verify
 
 Check that everything is configured correctly:
 ```bash
-zane doctor
+codex-remote doctor
 ```
 
 This checks for Bun, Codex CLI, Anchor source, dependencies, `.env` configuration, credentials, and whether Anchor is running.
@@ -79,7 +79,7 @@ This checks for Bun, Codex CLI, Anchor source, dependencies, `.env` configuratio
 ## Updating
 
 ```bash
-zane update
+codex-remote update
 ```
 
 This resets local repo changes, pulls the latest code, reinstalls Anchor dependencies, and redeploys Cloudflare services when self-host settings are present.
@@ -89,27 +89,27 @@ This resets local repo changes, pulls the latest code, reinstalls Anchor depende
 To deploy the entire stack to your own Cloudflare account:
 
 ```bash
-zane self-host
+codex-remote self-host
 ```
 
 See the [self-hosting guide](self-hosting.md) for prerequisites and a full walkthrough.
 
 ## Troubleshooting
 
-### "zane: command not found"
-Make sure `~/.zane/bin` is in your PATH:
+### "codex-remote: command not found"
+Make sure `~/.codex-remote/bin` is in your PATH:
 ```bash
-echo 'export PATH="$HOME/.zane/bin:$PATH"' >> ~/.zshrc
+echo 'export PATH="$HOME/.codex-remote/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 ### Connection issues
 Re-authenticate:
 ```bash
-zane login
+codex-remote login
 ```
 
 ### Check configuration
 ```bash
-zane doctor
+codex-remote doctor
 ```

@@ -35,8 +35,8 @@ def _make_client(
     db_path = tmp_path / "control_plane_test.db"
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
     monkeypatch.setenv("AUTH_MODE", auth_mode)
-    monkeypatch.setenv("ZANE_WEB_JWT_SECRET", "test-web-secret")
-    monkeypatch.setenv("ZANE_ANCHOR_JWT_SECRET", "test-anchor-secret")
+    monkeypatch.setenv("CODEX_REMOTE_WEB_JWT_SECRET", "test-web-secret")
+    monkeypatch.setenv("CODEX_REMOTE_ANCHOR_JWT_SECRET", "test-anchor-secret")
     monkeypatch.setenv("CORS_ORIGINS", "http://localhost:5173")
     monkeypatch.setenv("DEVICE_VERIFICATION_URL", "http://localhost:5173/device")
     monkeypatch.setenv("PASSKEY_ORIGIN", passkey_origin)

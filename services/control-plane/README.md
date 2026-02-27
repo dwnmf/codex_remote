@@ -42,7 +42,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080
 ## Env vars
 
 - `AUTH_MODE=passkey` or `AUTH_MODE=basic`
-- `ZANE_WEB_JWT_SECRET=change-me`
+- `CODEX_REMOTE_WEB_JWT_SECRET=change-me`
 - `DATABASE_PATH=./data/control_plane.db`
 - `CORS_ORIGINS=https://your-frontend.vercel.app,http://localhost:5173`
 - `DEVICE_VERIFICATION_URL=https://your-frontend.vercel.app/device`

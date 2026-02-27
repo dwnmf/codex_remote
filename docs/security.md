@@ -10,7 +10,7 @@
 
 ### Authentication
 - Users authenticate via WebAuthn passkeys.
-- Orbit auth endpoints issue short-lived JWTs (1 hour) signed with `ZANE_WEB_JWT_SECRET` (issuer `zane-auth`, audience `zane-web`).
+- Orbit auth endpoints issue short-lived JWTs (1 hour) signed with `CODEX_REMOTE_WEB_JWT_SECRET` (issuer `codex-remote-auth`, audience `codex-remote-web`).
 - Refresh tokens (7 days) are issued alongside access JWTs. Only the SHA-256 hash is stored server-side.
 - Refresh token rotation: each refresh atomically revokes the old session and mints a new one, preventing replay.
 - The client auto-refreshes the access JWT 60 seconds before expiry.
@@ -19,9 +19,9 @@
 
 ### Anchor Authentication
 - Anchor authenticates via a device code flow (`/auth/device/code` → `/auth/device/authorise` → `/auth/device/token`).
-- On successful device login, Orbit returns `ZANE_ANCHOR_JWT_SECRET` over HTTPS.
-- Anchor stores credentials in `~/.zane/credentials.json` with `0600` permissions.
-- Anchor mints short-lived JWTs (5 minutes) signed with `ZANE_ANCHOR_JWT_SECRET` (issuer `zane-anchor`, audience `zane-orbit-anchor`).
+- On successful device login, Orbit returns `CODEX_REMOTE_ANCHOR_JWT_SECRET` over HTTPS.
+- Anchor stores credentials in `~/.codex-remote/credentials.json` with `0600` permissions.
+- Anchor mints short-lived JWTs (5 minutes) signed with `CODEX_REMOTE_ANCHOR_JWT_SECRET` (issuer `codex-remote-anchor`, audience `codex-remote-orbit-anchor`).
 - Orbit validates both web and anchor token types based on audience and issuer.
 
 ### Transport
@@ -60,8 +60,8 @@
 - JWTs sent in WebSocket query params may appear in server logs.
 - Logs may contain sensitive info if the user requests it.
 - No E2E encryption between client and Anchor (Cloudflare terminates TLS).
-- `~/.zane/credentials.json` stores `ZANE_ANCHOR_JWT_SECRET` in plaintext.
-- `ZANE_ANCHOR_JWT_SECRET` is transmitted over HTTPS during device login — a single long-lived secret that lets the Anchor mint JWTs indefinitely.
+- `~/.codex-remote/credentials.json` stores `CODEX_REMOTE_ANCHOR_JWT_SECRET` in plaintext.
+- `CODEX_REMOTE_ANCHOR_JWT_SECRET` is transmitted over HTTPS during device login — a single long-lived secret that lets the Anchor mint JWTs indefinitely.
 - No rate limiting on any endpoint (login, device code polls, refresh, WebSocket connections).
 - CORS always-allow-localhost could be a concern on shared machines.
 - Durable Object challenge store uses a single instance (`idFromName("default")`) for all concurrent auth operations.
@@ -77,4 +77,4 @@
 - Rotate JWT secrets if any device is compromised.
 - Call `/auth/logout` to revoke sessions server-side.
 - Each user's Anchor connects with their own credentials. Do not share Anchor credentials across users.
-- Protect `~/.zane/credentials.json` — it contains the Anchor JWT signing secret.
+- Protect `~/.codex-remote/credentials.json` — it contains the Anchor JWT signing secret.

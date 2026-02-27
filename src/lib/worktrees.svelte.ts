@@ -1,7 +1,7 @@
 import type { GitWorktree } from "./types";
 import { socket } from "./socket.svelte";
 
-const STORE_KEY = "__zane_worktrees_store__";
+const STORE_KEY = "__codex_remote_worktrees_store__";
 
 class WorktreesStore {
   projectPath = $state("");

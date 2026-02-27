@@ -1,5 +1,5 @@
-const STORE_KEY = "__zane_theme__";
-const STORAGE_KEY = "zane-theme";
+const STORE_KEY = "__codex_remote_theme__";
+const STORAGE_KEY = "codex-remote-theme";
 
 export type Theme = "system" | "light" | "dark";
 

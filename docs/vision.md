@@ -47,4 +47,4 @@ Enable a single developer to start and supervise Codex CLI sessions running on t
 
 ## Open-Core Model
 
-Zane is open source under the [MIT license](../LICENSE). A hosted Orbit relay is planned so you can get started without deploying any infrastructure. Join the [waitlist](https://getzane.pages.dev) to get early access. If you want full control today, you can [self-host](../README.md#self-hosting) everything on your own Cloudflare account.
+Codex Remote is open source under the [MIT license](../LICENSE). A hosted Orbit relay is planned so you can get started without deploying any infrastructure. Join the [waitlist](https://getcodexremote.pages.dev) to get early access. If you want full control today, you can [self-host](../README.md#self-hosting) everything on your own Cloudflare account.

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# ── Zane Self-Host Wizard ───────────────────────
+# ── Codex Remote Self-Host Wizard ───────────────────────
 # Deploys Orbit (auth + relay) and Web to your Cloudflare account.
-# Sourced by `zane self-host` or the install script.
+# Sourced by `codex-remote self-host` or the install script.
 
 set -euo pipefail
 
-ZANE_HOME="${ZANE_HOME:-$HOME/.zane}"
-ENV_FILE="$ZANE_HOME/.env"
+CODEX_REMOTE_HOME="${CODEX_REMOTE_HOME:-$HOME/.codex-remote}"
+ENV_FILE="$CODEX_REMOTE_HOME/.env"
 
 # ── Colors ──────────────────────────────────────
 RED='\033[0;31m'
@@ -134,14 +134,14 @@ put_orbit_secret() {
   local out status
 
   # Wrangler v4 versioned workflow
-  out=$(printf "%s" "$value" | (cd "$ZANE_HOME/services/orbit" && wrangler versions secret put "$name") 2>&1)
+  out=$(printf "%s" "$value" | (cd "$CODEX_REMOTE_HOME/services/orbit" && wrangler versions secret put "$name") 2>&1)
   status=$?
   if [[ $status -eq 0 ]] && ! output_has_wrangler_error "$out"; then
     return 0
   fi
 
   # Fallback for older Wrangler behavior
-  out=$(printf "%s" "$value" | (cd "$ZANE_HOME/services/orbit" && wrangler secret put "$name") 2>&1)
+  out=$(printf "%s" "$value" | (cd "$CODEX_REMOTE_HOME/services/orbit" && wrangler secret put "$name") 2>&1)
   status=$?
   if [[ $status -ne 0 ]] || output_has_wrangler_error "$out"; then
     echo "$out"
@@ -151,7 +151,7 @@ put_orbit_secret() {
 }
 
 deploy_orbit() {
-  (cd "$ZANE_HOME/services/orbit" && wrangler_tty deploy)
+  (cd "$CODEX_REMOTE_HOME/services/orbit" && wrangler_tty deploy)
 }
 
 set_orbit_secret() {
@@ -181,16 +181,16 @@ extract_uuid() {
   grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | head -1 || true
 }
 
-extract_zane_db_uuid_from_list() {
+extract_codex_remote_db_uuid_from_list() {
   local raw="$1"
   local flat object uuid
 
   flat=$(echo "$raw" | tr -d '\n')
-  object=$(echo "$flat" | grep -oE '\{[^{}]*"name"[[:space:]]*:[[:space:]]*"zane"[^{}]*\}' | head -1 || true)
+  object=$(echo "$flat" | grep -oE '\{[^{}]*"name"[[:space:]]*:[[:space:]]*"codex-remote"[^{}]*\}' | head -1 || true)
   uuid=$(echo "$object" | grep -oE '"uuid"[[:space:]]*:[[:space:]]*"[0-9a-fA-F-]{36}"' | head -1 | cut -d'"' -f4 || true)
 
   if [[ -z "$uuid" ]]; then
-    uuid=$(echo "$raw" | grep -i "zane" | extract_uuid || true)
+    uuid=$(echo "$raw" | grep -i "codex-remote" | extract_uuid || true)
   fi
 
   printf "%s" "$uuid"
@@ -254,44 +254,44 @@ list_d1_databases() {
 }
 
 create_d1_database() {
-  wrangler_tty d1 create zane
+  wrangler_tty d1 create codex-remote
 }
 
 run_migrations() {
-  (cd "$ZANE_HOME" && wrangler_tty d1 migrations apply zane --remote)
+  (cd "$CODEX_REMOTE_HOME" && wrangler_tty d1 migrations apply codex-remote --remote)
 }
 
 install_orbit_deps() {
-  (cd "$ZANE_HOME/services/orbit" && bun install --silent)
+  (cd "$CODEX_REMOTE_HOME/services/orbit" && bun install --silent)
 }
 
 install_web_deps() {
-  (cd "$ZANE_HOME" && bun install --silent)
+  (cd "$CODEX_REMOTE_HOME" && bun install --silent)
 }
 
 build_web() {
   local auth_url="$1"
   local public_key="$2"
-  (cd "$ZANE_HOME" && AUTH_URL="$auth_url" AUTH_MODE="passkey" VAPID_PUBLIC_KEY="$public_key" bun run build)
+  (cd "$CODEX_REMOTE_HOME" && AUTH_URL="$auth_url" AUTH_MODE="passkey" VAPID_PUBLIC_KEY="$public_key" bun run build)
 }
 
 create_pages_project() {
-  (cd "$ZANE_HOME" && CI=true wrangler_tty pages project create zane --production-branch main)
+  (cd "$CODEX_REMOTE_HOME" && CI=true wrangler_tty pages project create codex-remote --production-branch main)
 }
 
 deploy_pages() {
-  (cd "$ZANE_HOME" && CI=true wrangler_tty pages deploy dist --project-name zane --commit-dirty=true)
+  (cd "$CODEX_REMOTE_HOME" && CI=true wrangler_tty pages deploy dist --project-name codex-remote --commit-dirty=true)
 }
 
 # ── Preflight ────────────────────────────────────
 step "0. Validating local setup"
 
 [[ -r /dev/tty ]] || abort "This wizard requires an interactive terminal."
-[[ -d "$ZANE_HOME" ]] || abort "ZANE_HOME not found: $ZANE_HOME"
-[[ -d "$ZANE_HOME/services/orbit" ]] || abort "Orbit service not found at $ZANE_HOME/services/orbit"
-[[ -f "$ZANE_HOME/wrangler.toml" ]] || abort "Missing $ZANE_HOME/wrangler.toml"
-[[ -f "$ZANE_HOME/services/orbit/wrangler.toml" ]] || abort "Missing $ZANE_HOME/services/orbit/wrangler.toml"
-[[ -d "$ZANE_HOME/migrations" ]] || abort "Missing migrations directory at $ZANE_HOME/migrations"
+[[ -d "$CODEX_REMOTE_HOME" ]] || abort "CODEX_REMOTE_HOME not found: $CODEX_REMOTE_HOME"
+[[ -d "$CODEX_REMOTE_HOME/services/orbit" ]] || abort "Orbit service not found at $CODEX_REMOTE_HOME/services/orbit"
+[[ -f "$CODEX_REMOTE_HOME/wrangler.toml" ]] || abort "Missing $CODEX_REMOTE_HOME/wrangler.toml"
+[[ -f "$CODEX_REMOTE_HOME/services/orbit/wrangler.toml" ]] || abort "Missing $CODEX_REMOTE_HOME/services/orbit/wrangler.toml"
+[[ -d "$CODEX_REMOTE_HOME/migrations" ]] || abort "Missing migrations directory at $CODEX_REMOTE_HOME/migrations"
 command -v bun &>/dev/null || abort "bun is required. Install bun and re-run this wizard."
 command -v openssl &>/dev/null || abort "openssl is required to generate secrets."
 pass "Local files verified"
@@ -333,18 +333,18 @@ if ! retry_capture 3 3 "Listing D1 databases" list_d1_databases; then
 fi
 db_list="$RETRY_LAST_OUTPUT"
 
-database_id=$(extract_zane_db_uuid_from_list "$db_list")
+database_id=$(extract_codex_remote_db_uuid_from_list "$db_list")
 if [[ -n "$database_id" ]]; then
   pass "Found existing database: $database_id"
 else
-  echo "  Creating database 'zane'..."
+  echo "  Creating database 'codex-remote'..."
   if ! retry_capture 3 3 "Creating D1 database" create_d1_database; then
-    warn "Failed to create D1 database 'zane'."
+    warn "Failed to create D1 database 'codex-remote'."
     echo "$RETRY_LAST_OUTPUT"
     ensure_cloudflare_auth
     retry_capture 3 3 "Creating D1 database" create_d1_database || {
       echo "$RETRY_LAST_OUTPUT"
-      abort "Could not create D1 database 'zane'."
+      abort "Could not create D1 database 'codex-remote'."
     }
   fi
 
@@ -353,7 +353,7 @@ else
   database_id=$(echo "$db_output" | extract_uuid)
 
   if [[ -z "$database_id" ]] && retry_capture 3 3 "Listing D1 databases" list_d1_databases; then
-    database_id=$(extract_zane_db_uuid_from_list "$RETRY_LAST_OUTPUT")
+    database_id=$(extract_codex_remote_db_uuid_from_list "$RETRY_LAST_OUTPUT")
   fi
 
   if [[ -z "$database_id" ]]; then
@@ -376,8 +376,8 @@ pass "Database ID: $database_id"
 step "3. Updating wrangler.toml configurations"
 
 for toml_path in \
-  "$ZANE_HOME/wrangler.toml" \
-  "$ZANE_HOME/services/orbit/wrangler.toml"; do
+  "$CODEX_REMOTE_HOME/wrangler.toml" \
+  "$CODEX_REMOTE_HOME/services/orbit/wrangler.toml"; do
   update_database_id_toml "$toml_path" "$database_id" \
     || abort "Failed to update database_id in $toml_path"
   pass "Updated $(basename "$(dirname "$toml_path")")/wrangler.toml"
@@ -396,10 +396,10 @@ fi
 vapid_public_key=$(echo "$vapid_output" | grep '^VAPID_PUBLIC_KEY=' | cut -d= -f2- || true)
 vapid_private_key=$(echo "$vapid_output" | grep '^VAPID_PRIVATE_KEY=' | cut -d= -f2- || true)
 [[ -n "$vapid_public_key" && -n "$vapid_private_key" ]] || abort "Failed to parse generated VAPID keys."
-vapid_subject="mailto:admin@zane.invalid"
+vapid_subject="mailto:admin@codex-remote.invalid"
 
-pass "ZANE_WEB_JWT_SECRET generated"
-pass "ZANE_ANCHOR_JWT_SECRET generated"
+pass "CODEX_REMOTE_WEB_JWT_SECRET generated"
+pass "CODEX_REMOTE_ANCHOR_JWT_SECRET generated"
 pass "VAPID keypair generated"
 
 # ── Run database migrations ─────────────────────
@@ -426,8 +426,8 @@ if output_has_wrangler_error "$orbit_output"; then
   abort "Orbit deploy returned Cloudflare API errors."
 fi
 
-set_orbit_secret "ZANE_WEB_JWT_SECRET" "$web_jwt_secret"
-set_orbit_secret "ZANE_ANCHOR_JWT_SECRET" "$anchor_jwt_secret"
+set_orbit_secret "CODEX_REMOTE_WEB_JWT_SECRET" "$web_jwt_secret"
+set_orbit_secret "CODEX_REMOTE_ANCHOR_JWT_SECRET" "$anchor_jwt_secret"
 
 orbit_url=$(echo "$orbit_output" | grep -oE 'https://[^ ]+\.workers\.dev' | head -1 || true)
 if ! is_https_url "$orbit_url"; then
@@ -447,7 +447,7 @@ retry 3 3 "Web dependency install" install_web_deps \
 echo "  Building with AUTH_URL=$orbit_url and VAPID_PUBLIC_KEY configured ..."
 if ! retry_capture 2 3 "Web build" build_web "$orbit_url" "$vapid_public_key"; then
   warn "Build failed — retrying after reinstalling esbuild..."
-  (cd "$ZANE_HOME" && rm -rf node_modules/esbuild node_modules/.cache)
+  (cd "$CODEX_REMOTE_HOME" && rm -rf node_modules/esbuild node_modules/.cache)
   retry 3 3 "Web dependency reinstall" install_web_deps \
     || abort "Failed to reinstall web dependencies."
   if ! retry_capture 2 3 "Web build after reinstall" build_web "$orbit_url" "$vapid_public_key"; then
@@ -482,7 +482,7 @@ if [[ -n "$pages_url" ]]; then
 fi
 if ! is_https_url "$pages_url"; then
   warn "Could not detect a valid web URL from deploy output."
-  prompt_for_required_url pages_url "  Enter your Pages URL (e.g. https://zane-xxx.pages.dev): "
+  prompt_for_required_url pages_url "  Enter your Pages URL (e.g. https://codex-remote-xxx.pages.dev): "
 fi
 
 pass "Web deployed: $pages_url"
@@ -510,9 +510,9 @@ pass "Orbit redeployed"
 # ── Generate .env for anchor ────────────────────
 step "9. Configuring anchor"
 
-tmp_env_file=$(mktemp "$ZANE_HOME/.env.tmp.XXXXXX") || abort "Failed to prepare temporary .env file."
+tmp_env_file=$(mktemp "$CODEX_REMOTE_HOME/.env.tmp.XXXXXX") || abort "Failed to prepare temporary .env file."
 cat > "$tmp_env_file" <<ENVEOF
-# Zane Anchor Configuration (self-host)
+# Codex Remote Anchor Configuration (self-host)
 ANCHOR_PORT=8788
 ANCHOR_ORBIT_URL=${orbit_ws_url}
 AUTH_URL=${orbit_url}
@@ -536,5 +536,5 @@ printf "  ${BOLD}Orbit:${RESET}  %s\n" "$orbit_url"
 echo ""
 echo "  Next steps:"
 printf "    1. Open ${BOLD}%s${RESET} and create your account\n" "$pages_url"
-printf "    2. Run ${BOLD}zane start${RESET} to sign in and launch the anchor\n"
+printf "    2. Run ${BOLD}codex-remote start${RESET} to sign in and launch the anchor\n"
 echo ""

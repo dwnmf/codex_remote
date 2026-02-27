@@ -14,7 +14,7 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 pip install -r requirements.txt
 export AUTH_MODE=basic
-export ZANE_WEB_JWT_SECRET=change-me
+export CODEX_REMOTE_WEB_JWT_SECRET=change-me
 export CORS_ORIGINS=https://your-frontend.vercel.app,http://localhost:5173
 export DEVICE_VERIFICATION_URL=https://your-frontend.vercel.app/device
 # passkey mode only:
@@ -43,7 +43,7 @@ Set Anchor env:
 Run:
 
 ```bash
-zane start
+codex-remote start
 ```
 
 Anchor will use device code login and connect to FastAPI relay.

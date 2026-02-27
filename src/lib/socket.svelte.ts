@@ -9,7 +9,7 @@ import type {
 const HEARTBEAT_INTERVAL = 30_000;
 const HEARTBEAT_TIMEOUT = 10_000;
 const RECONNECT_DELAY = 2_000;
-const CLIENT_ID_KEY = "__zane_client_id__";
+const CLIENT_ID_KEY = "__codex_remote_client_id__";
 const LOCAL_MODE_TOKEN = "local-mode";
 
 function getClientId(): string | null {

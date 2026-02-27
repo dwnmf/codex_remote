@@ -1,6 +1,6 @@
 {
-  "name": "Zane",
-  "short_name": "Zane",
+  "name": "Codex Remote",
+  "short_name": "Codex Remote",
   "start_url": "/app",
   "display": "standalone",
   "background_color": "#0a0a0a",

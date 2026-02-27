@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ── Zane Installer ──────────────────────────────
-# Usage: curl -fsSL https://raw.githubusercontent.com/cospec-ai/zane/main/install.sh | bash
+# ── Codex Remote Installer ──────────────────────────────
+# Usage: curl -fsSL https://raw.githubusercontent.com/cospec-ai/codex-remote/main/install.sh | bash
 
-ZANE_HOME="${ZANE_HOME:-$HOME/.zane}"
-ZANE_REPO="${ZANE_REPO:-https://github.com/cospec-ai/zane.git}"
-ZANE_BRANCH="${ZANE_BRANCH:-}"
+CODEX_REMOTE_HOME="${CODEX_REMOTE_HOME:-$HOME/.codex-remote}"
+CODEX_REMOTE_REPO="${CODEX_REMOTE_REPO:-https://github.com/cospec-ai/codex-remote.git}"
+CODEX_REMOTE_BRANCH="${CODEX_REMOTE_BRANCH:-}"
 
 # ── Colors ──────────────────────────────────────
 RED='\033[0;31m'
@@ -62,18 +62,18 @@ resolve_origin_branch() {
 }
 
 ensure_env_file() {
-  if [[ -f "$ZANE_HOME/.env" ]]; then
+  if [[ -f "$CODEX_REMOTE_HOME/.env" ]]; then
     return 0
   fi
-  if [[ -f "$ZANE_HOME/.env.example" ]]; then
-    cp "$ZANE_HOME/.env.example" "$ZANE_HOME/.env"
+  if [[ -f "$CODEX_REMOTE_HOME/.env.example" ]]; then
+    cp "$CODEX_REMOTE_HOME/.env.example" "$CODEX_REMOTE_HOME/.env"
     pass "Created .env from .env.example"
     return 0
   fi
 
-  cat > "$ZANE_HOME/.env" <<ENVEOF
-# Zane Anchor Configuration (self-host)
-# Run 'zane self-host' to complete setup.
+  cat > "$CODEX_REMOTE_HOME/.env" <<ENVEOF
+# Codex Remote Anchor Configuration (self-host)
+# Run 'codex-remote self-host' to complete setup.
 ANCHOR_PORT=8788
 ANCHOR_ORBIT_URL=
 AUTH_URL=
@@ -87,14 +87,14 @@ ENVEOF
 cleanup() {
   if [[ $? -ne 0 ]]; then
     echo ""
-    warn "Installation failed. Partial files may exist at $ZANE_HOME"
+    warn "Installation failed. Partial files may exist at $CODEX_REMOTE_HOME"
   fi
 }
 trap cleanup EXIT
 
 # ── Banner ──────────────────────────────────────
 echo ""
-printf "${BOLD}Zane Installer${RESET}\n"
+printf "${BOLD}Codex Remote Installer${RESET}\n"
 echo ""
 
 # ── Check OS ────────────────────────────────────
@@ -154,7 +154,7 @@ if command -v codex &>/dev/null; then
 else
   warn "codex CLI not found"
   echo ""
-  echo "  The codex CLI is required to run Zane."
+  echo "  The codex CLI is required to run Codex Remote."
   echo ""
   if command -v brew &>/dev/null; then
     if confirm "  Install codex via Homebrew?"; then
@@ -195,75 +195,75 @@ else
 fi
 
 # ── Clone/update repo ──────────────────────────
-step "Installing Zane to $ZANE_HOME..."
+step "Installing Codex Remote to $CODEX_REMOTE_HOME..."
 
-if [[ -d "$ZANE_HOME/.git" ]]; then
+if [[ -d "$CODEX_REMOTE_HOME/.git" ]]; then
   echo "  Existing installation found. Updating..."
-  if [[ -n "$(git -C "$ZANE_HOME" status --porcelain)" ]]; then
+  if [[ -n "$(git -C "$CODEX_REMOTE_HOME" status --porcelain)" ]]; then
     warn "Local changes detected and will be overwritten."
   fi
   warn "Resetting local checkout to the remote branch state."
 
-  retry 3 3 "git fetch" git -C "$ZANE_HOME" fetch --prune origin \
+  retry 3 3 "git fetch" git -C "$CODEX_REMOTE_HOME" fetch --prune origin \
     || abort "Failed to fetch updates from origin."
 
-  target_branch="$ZANE_BRANCH"
+  target_branch="$CODEX_REMOTE_BRANCH"
   if [[ -z "$target_branch" ]]; then
-    target_branch=$(resolve_origin_branch "$ZANE_HOME")
+    target_branch=$(resolve_origin_branch "$CODEX_REMOTE_HOME")
   fi
 
-  if ! git -C "$ZANE_HOME" show-ref --verify --quiet "refs/remotes/origin/$target_branch"; then
+  if ! git -C "$CODEX_REMOTE_HOME" show-ref --verify --quiet "refs/remotes/origin/$target_branch"; then
     abort "Remote branch origin/$target_branch not found."
   fi
 
-  before=$(git -C "$ZANE_HOME" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-  git -C "$ZANE_HOME" reset --hard --quiet "origin/$target_branch"
-  git -C "$ZANE_HOME" clean -fd --quiet
-  after=$(git -C "$ZANE_HOME" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  before=$(git -C "$CODEX_REMOTE_HOME" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  git -C "$CODEX_REMOTE_HOME" reset --hard --quiet "origin/$target_branch"
+  git -C "$CODEX_REMOTE_HOME" clean -fd --quiet
+  after=$(git -C "$CODEX_REMOTE_HOME" rev-parse --short HEAD 2>/dev/null || echo "unknown")
   pass "Updated $before -> $after (origin/$target_branch)"
 else
-  if [[ -d "$ZANE_HOME" ]]; then
-    warn "$ZANE_HOME exists but is not a git repo. Backing up..."
-    mv "$ZANE_HOME" "$ZANE_HOME.bak.$(date +%s)"
+  if [[ -d "$CODEX_REMOTE_HOME" ]]; then
+    warn "$CODEX_REMOTE_HOME exists but is not a git repo. Backing up..."
+    mv "$CODEX_REMOTE_HOME" "$CODEX_REMOTE_HOME.bak.$(date +%s)"
   fi
-  if [[ -n "$ZANE_BRANCH" ]]; then
-    retry 3 3 "git clone" git clone --depth 1 --branch "$ZANE_BRANCH" "$ZANE_REPO" "$ZANE_HOME" \
-      || abort "Failed to clone $ZANE_REPO ($ZANE_BRANCH)."
+  if [[ -n "$CODEX_REMOTE_BRANCH" ]]; then
+    retry 3 3 "git clone" git clone --depth 1 --branch "$CODEX_REMOTE_BRANCH" "$CODEX_REMOTE_REPO" "$CODEX_REMOTE_HOME" \
+      || abort "Failed to clone $CODEX_REMOTE_REPO ($CODEX_REMOTE_BRANCH)."
   else
-    retry 3 3 "git clone" git clone --depth 1 "$ZANE_REPO" "$ZANE_HOME" \
-      || abort "Failed to clone $ZANE_REPO."
+    retry 3 3 "git clone" git clone --depth 1 "$CODEX_REMOTE_REPO" "$CODEX_REMOTE_HOME" \
+      || abort "Failed to clone $CODEX_REMOTE_REPO."
   fi
   pass "Cloned repository"
 fi
 
 # ── Install anchor dependencies ─────────────────
 echo "  Installing anchor dependencies..."
-retry 3 3 "Anchor dependency install" bash -c 'cd "$1/services/anchor" && bun install --silent' _ "$ZANE_HOME" \
+retry 3 3 "Anchor dependency install" bash -c 'cd "$1/services/anchor" && bun install --silent' _ "$CODEX_REMOTE_HOME" \
   || abort "Failed to install Anchor dependencies."
 pass "Anchor dependencies installed"
 
 # ── Install CLI ─────────────────────────────────
 step "Installing CLI..."
 
-mkdir -p "$ZANE_HOME/bin"
+mkdir -p "$CODEX_REMOTE_HOME/bin"
 
-cli_src="$ZANE_HOME/bin/zane"
+cli_src="$CODEX_REMOTE_HOME/bin/codex-remote"
 if [[ ! -f "$cli_src" ]]; then
   abort "CLI script not found at $cli_src"
 fi
 
 chmod +x "$cli_src"
-pass "CLI installed at $ZANE_HOME/bin/zane"
+pass "CLI installed at $CODEX_REMOTE_HOME/bin/codex-remote"
 
 # Add to PATH
-path_line="export PATH=\"$ZANE_HOME/bin:\$PATH\""
+path_line="export PATH=\"$CODEX_REMOTE_HOME/bin:\$PATH\""
 added_to=""
 
 for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
   if [[ -f "$rc" ]]; then
-    if ! grep -q 'zane/bin' "$rc"; then
+    if ! grep -q 'codex-remote/bin' "$rc"; then
       echo "" >> "$rc"
-      echo "# Zane" >> "$rc"
+      echo "# Codex Remote" >> "$rc"
       echo "$path_line" >> "$rc"
       added_to="${added_to} $(basename "$rc")"
     fi
@@ -273,41 +273,41 @@ done
 # If neither rc file existed, create .profile (portable default)
 if [[ -z "$added_to" ]]; then
   echo "" >> "$HOME/.profile"
-  echo "# Zane" >> "$HOME/.profile"
+  echo "# Codex Remote" >> "$HOME/.profile"
   echo "$path_line" >> "$HOME/.profile"
   added_to=" .profile"
 fi
 
 # Make it available in the current shell
-export PATH="$ZANE_HOME/bin:$PATH"
+export PATH="$CODEX_REMOTE_HOME/bin:$PATH"
 
 pass "Added to PATH in$added_to"
 
 # ── Self-host setup ────────────────────────────
 step "Self-host setup"
-local_wizard="$ZANE_HOME/bin/self-host.sh"
+local_wizard="$CODEX_REMOTE_HOME/bin/self-host.sh"
 if [[ ! -f "$local_wizard" ]]; then
   warn "Self-host wizard not found at $local_wizard"
   ensure_env_file
-  warn "Run 'zane self-host' after installation."
+  warn "Run 'codex-remote self-host' after installation."
 elif confirm "  Run self-host deployment now?"; then
   printf "  ${DIM}Deploying to your Cloudflare account...${RESET}\n"
   # shellcheck source=/dev/null
   source "$local_wizard"
 else
   ensure_env_file
-  echo "  Skipped cloud deployment. Run 'zane self-host' when you're ready."
+  echo "  Skipped cloud deployment. Run 'codex-remote self-host' when you're ready."
 fi
 
 # ── Done ────────────────────────────────────────
 echo ""
-printf "${GREEN}${BOLD}Zane installed successfully!${RESET}\n"
+printf "${GREEN}${BOLD}Codex Remote installed successfully!${RESET}\n"
 echo ""
 echo "  Get started:"
-printf "    ${BOLD}zane start${RESET}    Start the anchor service\n"
-printf "    ${BOLD}zane doctor${RESET}   Check your setup\n"
-printf "    ${BOLD}zane config${RESET}   Edit configuration\n"
-printf "    ${BOLD}zane help${RESET}     See all commands\n"
+printf "    ${BOLD}codex-remote start${RESET}    Start the anchor service\n"
+printf "    ${BOLD}codex-remote doctor${RESET}   Check your setup\n"
+printf "    ${BOLD}codex-remote config${RESET}   Edit configuration\n"
+printf "    ${BOLD}codex-remote help${RESET}     See all commands\n"
 echo ""
 echo "  You may need to restart your terminal or run:"
 if [[ "$platform_label" == "macOS" ]]; then

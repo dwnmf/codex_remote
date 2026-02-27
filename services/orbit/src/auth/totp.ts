@@ -158,7 +158,7 @@ export function buildTotpUri(args: {
   digits?: number;
   periodSec?: number;
 }): string {
-  const issuer = (args.issuer ?? "Zane").trim() || "Zane";
+  const issuer = (args.issuer ?? "Codex Remote").trim() || "Codex Remote";
   const digits = args.digits ?? DEFAULT_DIGITS;
   const periodSec = args.periodSec ?? DEFAULT_PERIOD_SEC;
   const label = `${issuer}:${args.accountName}`;

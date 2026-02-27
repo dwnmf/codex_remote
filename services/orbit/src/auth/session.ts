@@ -5,8 +5,8 @@ import type { SessionPayload, StoredUser } from "./types";
 import { createSessionRecord, getSessionRecord, consumeRefreshToken, getUserById } from "./db";
 import { base64UrlEncode } from "./utils";
 
-const JWT_ISSUER = "zane-auth";
-const JWT_AUDIENCE = "zane-web";
+const JWT_ISSUER = "codex-remote-auth";
+const JWT_AUDIENCE = "codex-remote-web";
 const SESSION_TTL_SEC = 60 * 60;
 const REFRESH_TTL_SEC = 60 * 60 * 24 * 7;
 
@@ -17,10 +17,10 @@ function parseBearerToken(req: Request): string | null {
 }
 
 function getJwtSecret(env: AuthEnv): string {
-  if (!env.ZANE_WEB_JWT_SECRET?.trim()) {
-    throw new Error("ZANE_WEB_JWT_SECRET is required");
+  if (!env.CODEX_REMOTE_WEB_JWT_SECRET?.trim()) {
+    throw new Error("CODEX_REMOTE_WEB_JWT_SECRET is required");
   }
-  return env.ZANE_WEB_JWT_SECRET.trim();
+  return env.CODEX_REMOTE_WEB_JWT_SECRET.trim();
 }
 
 function generateSessionId(): string {

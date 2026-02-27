@@ -118,7 +118,7 @@
           </p>
         {:else if anchorList.length === 0}
           <p class="hint">
-            No devices connected. Run <code>zane start</code> in your terminal — a code will appear, then enter it at <a href="/device">/device</a> to authorise.
+            No devices connected. Run <code>codex-remote start</code> in your terminal — a code will appear, then enter it at <a href="/device">/device</a> to authorise.
           </p>
         {:else}
           <ul class="anchor-list">

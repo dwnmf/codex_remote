@@ -63,8 +63,8 @@ function createTestEnv(): AuthEnv {
     DB: db,
     PASSKEY_CHALLENGE_DO: challengeNamespace,
     PASSKEY_ORIGIN: "https://app.test",
-    ZANE_WEB_JWT_SECRET: "test-web-secret",
-    ZANE_ANCHOR_JWT_SECRET: "test-anchor-secret",
+    CODEX_REMOTE_WEB_JWT_SECRET: "test-web-secret",
+    CODEX_REMOTE_ANCHOR_JWT_SECRET: "test-anchor-secret",
   };
 }
 

@@ -28,8 +28,8 @@ def generate_device_code() -> str:
 def build_access_token(user: User, session_id: str) -> str:
     iat = now_sec()
     payload: dict[str, Any] = {
-        "iss": "zane-auth",
-        "aud": "zane-web",
+        "iss": "codex-remote-auth",
+        "aud": "codex-remote-web",
         "sub": user.id,
         "name": user.name,
         "jti": session_id,
@@ -45,8 +45,8 @@ def verify_web_token(token: str) -> dict[str, Any] | None:
             token,
             settings.web_jwt_secret,
             algorithms=["HS256"],
-            audience="zane-web",
-            issuer="zane-auth",
+            audience="codex-remote-web",
+            issuer="codex-remote-auth",
             options={"require": ["exp", "sub", "jti", "iss", "aud"]},
         )
     except jwt.PyJWTError:
@@ -59,8 +59,8 @@ def verify_anchor_jwt_legacy(token: str) -> dict[str, Any] | None:
             token,
             settings.anchor_jwt_secret,
             algorithms=["HS256"],
-            audience="zane-orbit-anchor",
-            issuer="zane-anchor",
+            audience="codex-remote-orbit-anchor",
+            issuer="codex-remote-anchor",
             options={"require": ["exp", "sub", "iss", "aud"]},
         )
     except jwt.PyJWTError:

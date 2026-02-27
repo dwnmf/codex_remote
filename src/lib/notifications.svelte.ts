@@ -1,8 +1,8 @@
 import type { RpcMessage } from "./types";
 import { socket } from "./socket.svelte";
 
-const STORE_KEY = "__zane_notifications_store__";
-const STORAGE_KEY = "zane_notifications_prefs";
+const STORE_KEY = "__codex_remote_notifications_store__";
+const STORAGE_KEY = "codex_remote_notifications_prefs";
 const VAPID_PUBLIC_KEY = (import.meta.env.VAPID_PUBLIC_KEY as string) || "";
 
 interface Prefs {

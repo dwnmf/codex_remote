@@ -1,8 +1,8 @@
-# Zane
+# Codex Remote
 
-Zane lets you monitor and control [Codex CLI](https://github.com/openai/codex) sessions running on your Mac from your phone, tablet, or any browser. Start tasks, watch real-time output, approve file writes, and review diffs from a handheld web client while your agent runs locally.
+Codex Remote lets you monitor and control [Codex CLI](https://github.com/openai/codex) sessions running on your Mac from your phone, tablet, or any browser. Start tasks, watch real-time output, approve file writes, and review diffs from a handheld web client while your agent runs locally.
 
-<img src="docs/assets/demo.gif" alt="Zane demo" width="320" />
+<img src="docs/assets/demo.gif" alt="Codex Remote demo" width="320" />
 
 ## Features
 
@@ -50,13 +50,13 @@ Zane lets you monitor and control [Codex CLI](https://github.com/openai/codex) s
 macOS / Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cospec-ai/zane/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/cospec-ai/codex-remote/main/install.sh | bash
 ```
 
 Windows (PowerShell):
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/cospec-ai/zane/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/cospec-ai/codex-remote/main/install.ps1 | iex
 ```
 
 The installer now prompts whether to run self-host deployment immediately or skip and run it later.
@@ -64,14 +64,14 @@ The installer now prompts whether to run self-host deployment immediately or ski
 ### Run
 
 ```bash
-zane start
+codex-remote start
 ```
 
 If you skipped deployment during install, run:
 
 ```bash
-zane self-host
-zane start
+codex-remote self-host
+codex-remote start
 ```
 
 On first run:
@@ -163,13 +163,13 @@ High-level setup:
 
 | Command | Description |
 |---------|-------------|
-| `zane start` | Start the Anchor service |
-| `zane login` | Re-authenticate |
-| `zane doctor` | Check prerequisites and configuration |
-| `zane config` | Open `.env` in your editor |
-| `zane update` | Pull latest and reinstall |
-| `zane self-host` | Deploy to your own Cloudflare account |
-| `zane uninstall` | Remove Zane |
+| `codex-remote start` | Start the Anchor service |
+| `codex-remote login` | Re-authenticate |
+| `codex-remote doctor` | Check prerequisites and configuration |
+| `codex-remote config` | Open `.env` in your editor |
+| `codex-remote update` | Pull latest and reinstall |
+| `codex-remote self-host` | Deploy to your own Cloudflare account |
+| `codex-remote uninstall` | Remove Codex Remote |
 
 ## Documentation
 

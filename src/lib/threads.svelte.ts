@@ -6,8 +6,8 @@ import { anchors } from "./anchors.svelte";
 import { auth } from "./auth.svelte";
 import { navigate } from "../router";
 
-const STORE_KEY = "__zane_threads_store__";
-const SETTINGS_STORAGE_KEY = "zane_thread_settings";
+const STORE_KEY = "__codex_remote_threads_store__";
+const SETTINGS_STORAGE_KEY = "codex_remote_thread_settings";
 
 const DEFAULT_SETTINGS: ThreadSettings = {
   model: "",

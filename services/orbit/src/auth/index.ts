@@ -103,7 +103,7 @@ const ANCHOR_ACCESS_TOKEN_TTL_SEC = 60 * 60;
 const TOTP_SETUP_TOKEN_TTL_SEC = 10 * 60;
 const TOTP_DIGITS = 6;
 const TOTP_PERIOD_SEC = 30;
-const TOTP_ISSUER = "Zane";
+const TOTP_ISSUER = "Codex Remote";
 
 function extractChallengeFromClientData(clientDataJSON: unknown): string | null {
   if (typeof clientDataJSON !== "string" || !clientDataJSON) return null;
@@ -123,7 +123,7 @@ function parseTotpCode(raw: unknown): string {
 }
 
 function getWebJwtSecret(env: AuthEnv): string | null {
-  const secret = env.ZANE_WEB_JWT_SECRET?.trim();
+  const secret = env.CODEX_REMOTE_WEB_JWT_SECRET?.trim();
   return secret || null;
 }
 
@@ -134,8 +134,8 @@ async function createTotpSetupToken(env: AuthEnv, payload: TotpSetupPayload): Pr
   const now = Math.floor(Date.now() / 1000);
   return await new SignJWT(payload as unknown as Record<string, unknown>)
     .setProtectedHeader({ alg: "HS256" })
-    .setIssuer("zane-auth")
-    .setAudience("zane-totp-setup")
+    .setIssuer("codex-remote-auth")
+    .setAudience("codex-remote-totp-setup")
     .setIssuedAt(now)
     .setExpirationTime(now + TOTP_SETUP_TOKEN_TTL_SEC)
     .sign(new TextEncoder().encode(secret));
@@ -146,8 +146,8 @@ async function verifyTotpSetupToken(env: AuthEnv, token: string): Promise<TotpSe
   if (!secret) return null;
   try {
     const { payload } = await jwtVerify(token, new TextEncoder().encode(secret), {
-      issuer: "zane-auth",
-      audience: "zane-totp-setup",
+      issuer: "codex-remote-auth",
+      audience: "codex-remote-totp-setup",
     });
     if (
       typeof payload.name !== "string" ||
@@ -177,15 +177,15 @@ async function verifyTotpSetupToken(env: AuthEnv, token: string): Promise<TotpSe
 }
 
 async function createAnchorAccessToken(env: AuthEnv, userId: string): Promise<{ token: string; expiresIn: number } | null> {
-  const secret = env.ZANE_ANCHOR_JWT_SECRET?.trim();
+  const secret = env.CODEX_REMOTE_ANCHOR_JWT_SECRET?.trim();
   if (!secret) return null;
 
   const now = Math.floor(Date.now() / 1000);
   const token = await new SignJWT({})
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(userId)
-    .setIssuer("zane-anchor")
-    .setAudience("zane-orbit-anchor")
+    .setIssuer("codex-remote-anchor")
+    .setAudience("codex-remote-orbit-anchor")
     .setIssuedAt(now)
     .setExpirationTime(now + ANCHOR_ACCESS_TOKEN_TTL_SEC)
     .sign(new TextEncoder().encode(secret));
@@ -361,7 +361,7 @@ async function handleRegisterOptions(req: Request, env: AuthEnv): Promise<Respon
   const rpID = getRpId(origin!);
 
   const options = await generateRegistrationOptions({
-    rpName: "Zane",
+    rpName: "Codex Remote",
     rpID,
     userID: base64UrlDecode(userId),
     userName,
@@ -947,7 +947,7 @@ async function handleDeviceToken(req: Request, env: AuthEnv): Promise<Response> 
   }
 
   // Check secret exists before consuming (so record survives retries if misconfigured)
-  const anchorSecret = env.ZANE_ANCHOR_JWT_SECRET?.trim();
+  const anchorSecret = env.CODEX_REMOTE_ANCHOR_JWT_SECRET?.trim();
   if (!anchorSecret) {
     return Response.json({ error: "Anchor secret not configured on Orbit." }, { status: 503, headers: authCorsHeaders(req, env) });
   }

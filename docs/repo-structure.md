@@ -3,7 +3,7 @@
 ```
 .
 ├── bin/
-│   ├── zane                          # CLI entry point
+│   ├── codex-remote                          # CLI entry point
 │   └── self-host.sh                  # Self-host deployment wizard
 ├── docs/                             # Project documentation
 ├── migrations/                       # D1 database migrations
@@ -38,6 +38,6 @@
 - The web client is static and deploys to Cloudflare Pages.
 - Orbit runs on Cloudflare Workers with D1 for storage (relay + auth endpoints).
 - Anchor is Bun-only and runs locally on macOS.
-- `bin/zane` is the CLI entry point for local usage.
-- `bin/self-host.sh` is the self-host deployment wizard invoked by `zane self-host`.
+- `bin/codex-remote` is the CLI entry point for local usage.
+- `bin/self-host.sh` is the self-host deployment wizard invoked by `codex-remote self-host`.
 - `install.sh` handles cloning, dependency install, and PATH setup.

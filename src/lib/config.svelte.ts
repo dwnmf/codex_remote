@@ -1,5 +1,5 @@
-const STORE_KEY = "__zane_config_store__";
-const STORAGE_KEY = "zane_config";
+const STORE_KEY = "__codex_remote_config_store__";
+const STORAGE_KEY = "codex_remote_config";
 
 const AUTH_URL = (import.meta.env.AUTH_URL ?? "").replace(/\/$/, "");
 

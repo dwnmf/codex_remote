@@ -24,7 +24,7 @@ from webauthn.helpers.structs import (
 from .config import settings
 
 
-RP_NAME = "Zane"
+RP_NAME = "Codex Remote"
 
 
 def _json_dict(value: object) -> dict:

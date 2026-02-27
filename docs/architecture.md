@@ -101,10 +101,10 @@ Orbit adds its own control messages:
 ## Orbit Endpoints
 
 ### `GET /ws/client`
-WebSocket endpoint for the web client. Requires JWT with `zane-web` audience.
+WebSocket endpoint for the web client. Requires JWT with `codex-remote-web` audience.
 
 ### `GET /ws/anchor`
-WebSocket endpoint for Anchor. Requires JWT with `zane-orbit-anchor` audience.
+WebSocket endpoint for Anchor. Requires JWT with `codex-remote-orbit-anchor` audience.
 
 ## Auth Endpoints (served by Orbit)
 

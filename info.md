@@ -1,8 +1,8 @@
 # План интеграции `/ulw` (ULW / UltraWork Loop) в веб-чат
 
 ## Что уже выяснили
-- В `zane` slash-команды не парсятся отдельно на фронте/бэке: текст уходит как обычный `input.text`, интерпретация команды происходит во внешнем `codex app-server`.
-- Значит для настоящей команды `/ulw` основная реализация должна быть в обработчике команд `app-server`, а `zane` можно оставить почти без изменений.
+- В `codex-remote` slash-команды не парсятся отдельно на фронте/бэке: текст уходит как обычный `input.text`, интерпретация команды происходит во внешнем `codex app-server`.
+- Значит для настоящей команды `/ulw` основная реализация должна быть в обработчике команд `app-server`, а `codex-remote` можно оставить почти без изменений.
 - В `D:\REALPROJECTS\oh-my-opencode` ULW loop уже выделен как отдельная state-machine и хорошо переносится:
   - `command-arguments.ts` (парсинг аргументов),
   - `types.ts`, `loop-state-controller.ts` (состояние цикла),
@@ -12,7 +12,7 @@
 ## Рекомендуемая архитектура (MVP)
 1. Пользователь вводит в чат:  
    `/ulw сделать ...`
-2. `zane` передает сообщение как есть в текущем канале (`Thread.svelte` -> relay -> anchor -> `app-server`).
+2. `codex-remote` передает сообщение как есть в текущем канале (`Thread.svelte` -> relay -> anchor -> `app-server`).
 3. В `app-server`:
    - распознается команда `/ulw`,
    - создается loop state, привязанный к `session/thread`,
@@ -33,7 +33,7 @@
 - Расширенный режим (не для телефона, опционально):
   - `/ulw config max=50 promise=DONE` (редко используемая настройка для power users).
 
-## Точки интеграции в `zane` (минимум изменений)
+## Точки интеграции в `codex-remote` (минимум изменений)
 - Можно не менять transport-цепочку:  
   `src/routes/Thread.svelte`, `services/orbit/src/relay/orbit-relay-do.ts`, `services/anchor/src/index.ts`.
 - Опционально для UX:
@@ -55,7 +55,7 @@
 3. **Wave 3: События прогресса**
    - MVP: использовать существующие сообщения (`agentMessage`/`commandExecution`).
    - Расширение: добавить явные события `loop_started`, `iteration_progress`, `loop_completed`, `loop_stopped`.
-4. **Wave 4: UI-улучшения в `zane`**
+4. **Wave 4: UI-улучшения в `codex-remote`**
    - Мобильные quick-actions: `ULW` и `Stop`.
    - Подсказки команды в поле ввода (приоритет `/u`).
    - Рендер прогресса итераций в ленте (если введены новые event types).
@@ -69,7 +69,7 @@
    - Негативные кейсы: invalid args, превышение max-iterations, ручная остановка.
 
 ## Риски и как закрыть
-- Риск: в `zane` нет локального lifecycle-хука `session.idle`.  
+- Риск: в `codex-remote` нет локального lifecycle-хука `session.idle`.  
   Решение: цикл должен жить там, где есть управление сессией (`app-server`), не в UI.
 - Риск: разные форматы событий между `app-server` и web UI.  
   Решение: сначала использовать совместимые существующие message types, затем вводить новый тип событий.

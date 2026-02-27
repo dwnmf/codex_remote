@@ -2,10 +2,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")")" && pwd)"
-ZANE_HOME="${ZANE_HOME:-$(dirname "$SCRIPT_DIR")}"
-ANCHOR_DIR="$ZANE_HOME/services/anchor"
-ENV_FILE="$ZANE_HOME/.env"
-CREDENTIALS_FILE="$ZANE_HOME/credentials.json"
+CODEX_REMOTE_HOME="${CODEX_REMOTE_HOME:-$(dirname "$SCRIPT_DIR")}"
+ANCHOR_DIR="$CODEX_REMOTE_HOME/services/anchor"
+ENV_FILE="$CODEX_REMOTE_HOME/.env"
+CREDENTIALS_FILE="$CODEX_REMOTE_HOME/credentials.json"
 
 # ── Colors ──────────────────────────────────────
 RED='\033[0;31m'
@@ -82,7 +82,7 @@ resolve_origin_branch() {
 
 cmd_start() {
   if ! command -v bun &>/dev/null; then
-    echo "Error: bun is not installed. Run 'zane doctor' for details."
+    echo "Error: bun is not installed. Run 'codex-remote doctor' for details."
     exit 1
   fi
 
@@ -96,12 +96,12 @@ cmd_start() {
     exit 1
   fi
 
-  ZANE_CREDENTIALS_FILE="$CREDENTIALS_FILE" exec bun --env-file "$ENV_FILE" "$ANCHOR_DIR/src/index.ts"
+  CODEX_REMOTE_CREDENTIALS_FILE="$CREDENTIALS_FILE" exec bun --env-file "$ENV_FILE" "$ANCHOR_DIR/src/index.ts"
 }
 
 cmd_login() {
   if ! command -v bun &>/dev/null; then
-    echo "Error: bun is not installed. Run 'zane doctor' for details."
+    echo "Error: bun is not installed. Run 'codex-remote doctor' for details."
     exit 1
   fi
 
@@ -115,21 +115,21 @@ cmd_login() {
     exit 1
   fi
 
-  ZANE_FORCE_LOGIN=1 ZANE_CREDENTIALS_FILE="$CREDENTIALS_FILE" exec bun --env-file "$ENV_FILE" "$ANCHOR_DIR/src/index.ts"
+  CODEX_REMOTE_FORCE_LOGIN=1 CODEX_REMOTE_CREDENTIALS_FILE="$CREDENTIALS_FILE" exec bun --env-file "$ENV_FILE" "$ANCHOR_DIR/src/index.ts"
 }
 
 cmd_doctor() {
   echo ""
-  printf "${BOLD}Zane Doctor${RESET}\n"
+  printf "${BOLD}Codex Remote Doctor${RESET}\n"
   echo ""
 
   local has_error=0
 
-  # Check ZANE_HOME
-  if [[ -d "$ZANE_HOME" ]]; then
-    pass "ZANE_HOME exists ($ZANE_HOME)"
+  # Check CODEX_REMOTE_HOME
+  if [[ -d "$CODEX_REMOTE_HOME" ]]; then
+    pass "CODEX_REMOTE_HOME exists ($CODEX_REMOTE_HOME)"
   else
-    fail "ZANE_HOME not found ($ZANE_HOME)"
+    fail "CODEX_REMOTE_HOME not found ($CODEX_REMOTE_HOME)"
     has_error=1
   fi
 
@@ -182,7 +182,7 @@ cmd_doctor() {
       if [[ -f "$CREDENTIALS_FILE" ]]; then
         pass "Credentials file exists ($CREDENTIALS_FILE)"
       else
-        warn "Not logged in. Run 'zane login' or 'zane start' to authenticate."
+        warn "Not logged in. Run 'codex-remote login' or 'codex-remote start' to authenticate."
       fi
     else
       info "ANCHOR_ORBIT_URL not set (local-only mode)"
@@ -229,33 +229,33 @@ cmd_config() {
 }
 
 cmd_update() {
-  echo "Updating Zane..."
+  echo "Updating Codex Remote..."
 
-  if [[ ! -d "$ZANE_HOME/.git" ]]; then
-    echo "Error: $ZANE_HOME is not a git repository."
+  if [[ ! -d "$CODEX_REMOTE_HOME/.git" ]]; then
+    echo "Error: $CODEX_REMOTE_HOME is not a git repository."
     exit 1
   fi
 
   local before after target_branch
-  before=$(git -C "$ZANE_HOME" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  before=$(git -C "$CODEX_REMOTE_HOME" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-  if [[ -n "$(git -C "$ZANE_HOME" status --porcelain)" ]]; then
+  if [[ -n "$(git -C "$CODEX_REMOTE_HOME" status --porcelain)" ]]; then
     warn "Local changes detected and will be overwritten."
   fi
 
-  retry_cmd 3 3 "git fetch" git -C "$ZANE_HOME" fetch --prune origin \
+  retry_cmd 3 3 "git fetch" git -C "$CODEX_REMOTE_HOME" fetch --prune origin \
     || { echo "Error: Failed to fetch updates from origin."; exit 1; }
 
-  target_branch=$(resolve_origin_branch "$ZANE_HOME")
-  if ! git -C "$ZANE_HOME" show-ref --verify --quiet "refs/remotes/origin/$target_branch"; then
+  target_branch=$(resolve_origin_branch "$CODEX_REMOTE_HOME")
+  if ! git -C "$CODEX_REMOTE_HOME" show-ref --verify --quiet "refs/remotes/origin/$target_branch"; then
     echo "Error: Remote branch origin/$target_branch not found."
     exit 1
   fi
 
-  git -C "$ZANE_HOME" reset --hard --quiet "origin/$target_branch"
-  git -C "$ZANE_HOME" clean -fd --quiet
+  git -C "$CODEX_REMOTE_HOME" reset --hard --quiet "origin/$target_branch"
+  git -C "$CODEX_REMOTE_HOME" clean -fd --quiet
 
-  after=$(git -C "$ZANE_HOME" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  after=$(git -C "$CODEX_REMOTE_HOME" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
   if [[ "$before" == "$after" ]]; then
     echo "Already up to date ($after on origin/$target_branch)."
@@ -268,7 +268,7 @@ cmd_update() {
     local db_id
     db_id=$(grep -E '^D1_DATABASE_ID=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
     if [[ -n "$db_id" ]]; then
-      for toml_path in "$ZANE_HOME/wrangler.toml" "$ZANE_HOME/services/orbit/wrangler.toml"; do
+      for toml_path in "$CODEX_REMOTE_HOME/wrangler.toml" "$CODEX_REMOTE_HOME/services/orbit/wrangler.toml"; do
         if [[ -f "$toml_path" ]]; then
           update_database_id_toml "$toml_path" "$db_id" \
             || { echo "Error: Failed to update database_id in $toml_path"; exit 1; }
@@ -294,24 +294,24 @@ cmd_update() {
       fi
       if [[ -z "$vapid_public_key" ]]; then
         echo "Error: VAPID_PUBLIC_KEY is missing in $ENV_FILE."
-        echo "Run 'zane self-host' to regenerate and persist push settings."
+        echo "Run 'codex-remote self-host' to regenerate and persist push settings."
         exit 1
       fi
 
       echo "Rebuilding web..."
-      retry_cmd 3 3 "Web dependency install" bash -c 'cd "$1" && bun install --silent' _ "$ZANE_HOME" \
+      retry_cmd 3 3 "Web dependency install" bash -c 'cd "$1" && bun install --silent' _ "$CODEX_REMOTE_HOME" \
         || { echo "Error: Failed to install web dependencies."; exit 1; }
-      (cd "$ZANE_HOME" && AUTH_URL="$auth_url" VAPID_PUBLIC_KEY="$vapid_public_key" bun run build) \
+      (cd "$CODEX_REMOTE_HOME" && AUTH_URL="$auth_url" VAPID_PUBLIC_KEY="$vapid_public_key" bun run build) \
         || { echo "Error: Web build failed."; exit 1; }
 
       echo "Deploying web..."
-      (cd /tmp && CI=true wrangler_tty pages deploy "$ZANE_HOME/dist" --project-name zane --commit-dirty=true) \
+      (cd /tmp && CI=true wrangler_tty pages deploy "$CODEX_REMOTE_HOME/dist" --project-name codex-remote --commit-dirty=true) \
         || { echo "Error: Pages deploy failed."; exit 1; }
 
       echo "Deploying orbit..."
-      retry_cmd 3 3 "Orbit dependency install" bash -c 'cd "$1" && bun install --silent' _ "$ZANE_HOME/services/orbit" \
+      retry_cmd 3 3 "Orbit dependency install" bash -c 'cd "$1" && bun install --silent' _ "$CODEX_REMOTE_HOME/services/orbit" \
         || { echo "Error: Failed to install Orbit dependencies."; exit 1; }
-      (cd "$ZANE_HOME/services/orbit" && wrangler_tty deploy) \
+      (cd "$CODEX_REMOTE_HOME/services/orbit" && wrangler_tty deploy) \
         || { echo "Error: Orbit deploy failed."; exit 1; }
     fi
   fi
@@ -320,7 +320,7 @@ cmd_update() {
 }
 
 cmd_self_host() {
-  local script="$ZANE_HOME/bin/self-host.sh"
+  local script="$CODEX_REMOTE_HOME/bin/self-host.sh"
   if [[ ! -f "$script" ]]; then
     echo "Error: self-host wizard not found at $script"
     exit 1
@@ -331,10 +331,10 @@ cmd_self_host() {
 
 cmd_uninstall() {
   echo ""
-  printf "${BOLD}Uninstall Zane${RESET}\n"
+  printf "${BOLD}Uninstall Codex Remote${RESET}\n"
   echo ""
   echo "This will remove:"
-  echo "  $ZANE_HOME"
+  echo "  $CODEX_REMOTE_HOME"
   echo "  PATH entries from shell config"
   echo ""
   printf "Are you sure? [y/N] "
@@ -344,40 +344,40 @@ cmd_uninstall() {
     exit 0
   fi
 
-  # Remove ZANE_HOME
-  if [[ -d "$ZANE_HOME" ]]; then
-    rm -rf "$ZANE_HOME"
-    echo "Removed $ZANE_HOME"
+  # Remove CODEX_REMOTE_HOME
+  if [[ -d "$CODEX_REMOTE_HOME" ]]; then
+    rm -rf "$CODEX_REMOTE_HOME"
+    echo "Removed $CODEX_REMOTE_HOME"
   fi
 
   # Clean PATH from shell rc files
   local rc_files=("$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile")
   for rc in "${rc_files[@]}"; do
-    if [[ -f "$rc" ]] && grep -q 'zane/bin' "$rc"; then
-      awk '!/zane\/bin/' "$rc" > "$rc.tmp" && mv "$rc.tmp" "$rc"
+    if [[ -f "$rc" ]] && grep -q 'codex-remote/bin' "$rc"; then
+      awk '!/codex-remote\/bin/' "$rc" > "$rc.tmp" && mv "$rc.tmp" "$rc"
       echo "Cleaned $rc"
     fi
   done
 
   echo ""
-  echo "Zane has been uninstalled. Restart your terminal to apply PATH changes."
+  echo "Codex Remote has been uninstalled. Restart your terminal to apply PATH changes."
 }
 
 cmd_version() {
-  if [[ -d "$ZANE_HOME/.git" ]]; then
+  if [[ -d "$CODEX_REMOTE_HOME/.git" ]]; then
     local tag
-    tag=$(git -C "$ZANE_HOME" describe --tags --always 2>/dev/null || echo "dev")
-    echo "zane $tag"
+    tag=$(git -C "$CODEX_REMOTE_HOME" describe --tags --always 2>/dev/null || echo "dev")
+    echo "codex-remote $tag"
   else
-    echo "zane dev"
+    echo "codex-remote dev"
   fi
 }
 
 cmd_help() {
   echo ""
-  printf "${BOLD}Zane${RESET} — local AI assistant bridge\n"
+  printf "${BOLD}Codex Remote${RESET} — local AI assistant bridge\n"
   echo ""
-  echo "Usage: zane <command>"
+  echo "Usage: codex-remote <command>"
   echo ""
   echo "Commands:"
   echo "  start       Start the anchor service"
@@ -386,7 +386,7 @@ cmd_help() {
   echo "  config      Open .env in your editor"
   echo "  update      Pull latest code and reinstall dependencies"
   echo "  self-host   Run the self-host setup wizard"
-  echo "  uninstall   Remove Zane from your system"
+  echo "  uninstall   Remove Codex Remote from your system"
   echo "  version     Print version"
   echo "  help        Show this help"
   echo ""

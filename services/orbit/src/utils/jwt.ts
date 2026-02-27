@@ -77,21 +77,21 @@ export function extractJwtSub(token: string): string | null {
 }
 
 export async function verifyOrbitUserJwt(token: string, env: Env): Promise<{ ok: boolean; userId: string | null }> {
-  const secret = env.ZANE_WEB_JWT_SECRET?.trim();
+  const secret = env.CODEX_REMOTE_WEB_JWT_SECRET?.trim();
   if (!secret) return { ok: false, userId: null };
   const ok = await verifyJwtHs256(token, secret, {
-    issuer: "zane-auth",
-    audience: "zane-web",
+    issuer: "codex-remote-auth",
+    audience: "codex-remote-web",
   });
   return { ok, userId: ok ? extractJwtSub(token) : null };
 }
 
 export async function verifyOrbitAnchorJwt(token: string, env: Env): Promise<{ ok: boolean; userId: string | null }> {
-  const secret = env.ZANE_ANCHOR_JWT_SECRET?.trim();
+  const secret = env.CODEX_REMOTE_ANCHOR_JWT_SECRET?.trim();
   if (!secret) return { ok: false, userId: null };
   const ok = await verifyJwtHs256(token, secret, {
-    issuer: "zane-anchor",
-    audience: "zane-orbit-anchor",
+    issuer: "codex-remote-anchor",
+    audience: "codex-remote-orbit-anchor",
   });
   return { ok, userId: ok ? extractJwtSub(token) : null };
 }

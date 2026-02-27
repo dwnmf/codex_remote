@@ -30,8 +30,8 @@ class Settings:
 
 settings = Settings(
     auth_mode=os.getenv("AUTH_MODE", "basic").strip().lower() or "basic",
-    web_jwt_secret=os.getenv("ZANE_WEB_JWT_SECRET", "dev-web-secret-change-me").strip() or "dev-web-secret-change-me",
-    anchor_jwt_secret=os.getenv("ZANE_ANCHOR_JWT_SECRET", "dev-anchor-secret-change-me").strip()
+    web_jwt_secret=os.getenv("CODEX_REMOTE_WEB_JWT_SECRET", "dev-web-secret-change-me").strip() or "dev-web-secret-change-me",
+    anchor_jwt_secret=os.getenv("CODEX_REMOTE_ANCHOR_JWT_SECRET", "dev-anchor-secret-change-me").strip()
     or "dev-anchor-secret-change-me",
     access_ttl_sec=max(int(os.getenv("ACCESS_TTL_SEC", "3600")), 60),
     refresh_ttl_sec=max(int(os.getenv("REFRESH_TTL_SEC", "604800")), 300),

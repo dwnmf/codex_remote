@@ -2,7 +2,7 @@ import type { Message, RpcMessage, ApprovalRequest, UserInputRequest, UserInputQ
 import { socket } from "./socket.svelte";
 import { threads } from "./threads.svelte";
 
-const STORE_KEY = "__zane_messages_store__";
+const STORE_KEY = "__codex_remote_messages_store__";
 
 type ReasoningMode = "summary" | "raw";
 interface ReasoningState {

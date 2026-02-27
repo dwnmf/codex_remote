@@ -44,7 +44,7 @@ async def lifespan(_: FastAPI):
         db.close()
 
 
-app = FastAPI(title="Zane FastAPI Control Plane", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Codex Remote FastAPI Control Plane", version="0.2.0", lifespan=lifespan)
 hub = RelayHub()
 
 app.add_middleware(

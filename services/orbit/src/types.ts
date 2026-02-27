@@ -2,8 +2,8 @@ export type Role = "client" | "anchor";
 export type Direction = "client" | "server";
 
 export interface Env {
-  ZANE_WEB_JWT_SECRET?: string;
-  ZANE_ANCHOR_JWT_SECRET?: string;
+  CODEX_REMOTE_WEB_JWT_SECRET?: string;
+  CODEX_REMOTE_ANCHOR_JWT_SECRET?: string;
   PASSKEY_ORIGIN?: string;
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;

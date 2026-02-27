@@ -25,7 +25,7 @@
 </script>
 
 <svelte:head>
-  <title>Sign in — Zane</title>
+  <title>Sign in — Codex Remote</title>
 </svelte:head>
 
 <AuthPageLayout>
@@ -37,7 +37,7 @@
     {:else if method === "totp"}
       Sign in with your username and one-time code.
     {:else}
-      Use your passkey to access Zane.
+      Use your passkey to access Codex Remote.
     {/if}
   </p>
 

@@ -4,10 +4,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$script:ZaneHome = if ($env:ZANE_HOME) { $env:ZANE_HOME } else { Split-Path -Parent $script:ScriptDir }
-$script:AnchorDir = Join-Path $script:ZaneHome "services/anchor"
-$script:EnvFile = Join-Path $script:ZaneHome ".env"
-$script:CredentialsFile = Join-Path $script:ZaneHome "credentials.json"
+$script:CodexRemoteHome = if ($env:CODEX_REMOTE_HOME) { $env:CODEX_REMOTE_HOME } else { Split-Path -Parent $script:ScriptDir }
+$script:AnchorDir = Join-Path $script:CodexRemoteHome "services/anchor"
+$script:EnvFile = Join-Path $script:CodexRemoteHome ".env"
+$script:CredentialsFile = Join-Path $script:CodexRemoteHome "credentials.json"
 
 function Write-Pass([string]$Message) {
   Write-Host "  [OK] $Message" -ForegroundColor Green
@@ -94,7 +94,7 @@ function Invoke-WithEnv([hashtable]$Vars, [scriptblock]$Action) {
 
 function Assert-PrereqsForRun() {
   if (-not (Test-Tool "bun")) {
-    throw "bun is not installed. Run 'zane doctor' for details."
+    throw "bun is not installed. Run 'codex-remote doctor' for details."
   }
   if (-not (Test-Path $script:EnvFile)) {
     throw "$script:EnvFile not found. Run the installer first."
@@ -106,31 +106,31 @@ function Assert-PrereqsForRun() {
 
 function Cmd-Start() {
   Assert-PrereqsForRun
-  $env:ZANE_CREDENTIALS_FILE = $script:CredentialsFile
+  $env:CODEX_REMOTE_CREDENTIALS_FILE = $script:CredentialsFile
   & bun "--env-file" $script:EnvFile (Join-Path $script:AnchorDir "src/index.ts")
   exit $LASTEXITCODE
 }
 
 function Cmd-Login() {
   Assert-PrereqsForRun
-  $env:ZANE_FORCE_LOGIN = "1"
-  $env:ZANE_CREDENTIALS_FILE = $script:CredentialsFile
+  $env:CODEX_REMOTE_FORCE_LOGIN = "1"
+  $env:CODEX_REMOTE_CREDENTIALS_FILE = $script:CredentialsFile
   & bun "--env-file" $script:EnvFile (Join-Path $script:AnchorDir "src/index.ts")
   exit $LASTEXITCODE
 }
 
 function Cmd-Doctor() {
   Write-Host ""
-  Write-Host "Zane Doctor" -ForegroundColor Cyan
+  Write-Host "Codex Remote Doctor" -ForegroundColor Cyan
   Write-Host ""
 
   $hasError = $false
 
-  if (Test-Path $script:ZaneHome) {
-    Write-Pass "ZANE_HOME exists ($script:ZaneHome)"
+  if (Test-Path $script:CodexRemoteHome) {
+    Write-Pass "CODEX_REMOTE_HOME exists ($script:CodexRemoteHome)"
   }
   else {
-    Write-Fail "ZANE_HOME not found ($script:ZaneHome)"
+    Write-Fail "CODEX_REMOTE_HOME not found ($script:CodexRemoteHome)"
     $hasError = $true
   }
 
@@ -181,7 +181,7 @@ function Cmd-Doctor() {
       Write-Pass "Credentials file exists ($script:CredentialsFile)"
     }
     else {
-      Write-WarnLine "Not logged in. Run 'zane login' or 'zane start'."
+      Write-WarnLine "Not logged in. Run 'codex-remote login' or 'codex-remote start'."
     }
   }
   else {
@@ -220,40 +220,40 @@ function Cmd-Config() {
 }
 
 function Cmd-Update() {
-  Write-Host "Updating Zane..."
+  Write-Host "Updating Codex Remote..."
 
-  if (-not (Test-Path (Join-Path $script:ZaneHome ".git"))) {
-    throw "$script:ZaneHome is not a git repository."
+  if (-not (Test-Path (Join-Path $script:CodexRemoteHome ".git"))) {
+    throw "$script:CodexRemoteHome is not a git repository."
   }
 
-  $before = (& git -C $script:ZaneHome rev-parse --short HEAD 2>$null).Trim()
+  $before = (& git -C $script:CodexRemoteHome rev-parse --short HEAD 2>$null).Trim()
   if (-not $before) { $before = "unknown" }
 
-  $status = (& git -C $script:ZaneHome status --porcelain).Trim()
+  $status = (& git -C $script:CodexRemoteHome status --porcelain).Trim()
   if ($status) {
     Write-WarnLine "Local changes detected and will be overwritten."
   }
 
-  Invoke-Retry 3 3 "git fetch" { & git -C $script:ZaneHome fetch --prune origin }
+  Invoke-Retry 3 3 "git fetch" { & git -C $script:CodexRemoteHome fetch --prune origin }
 
-  $remoteHead = (& git -C $script:ZaneHome symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null).Trim()
+  $remoteHead = (& git -C $script:CodexRemoteHome symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null).Trim()
   $targetBranch = if ($remoteHead) { $remoteHead -replace "^origin/", "" } else { "main" }
 
-  & git -C $script:ZaneHome show-ref --verify --quiet "refs/remotes/origin/$targetBranch"
+  & git -C $script:CodexRemoteHome show-ref --verify --quiet "refs/remotes/origin/$targetBranch"
   if ($LASTEXITCODE -ne 0) {
     throw "Remote branch origin/$targetBranch not found."
   }
 
-  & git -C $script:ZaneHome reset --hard --quiet "origin/$targetBranch"
+  & git -C $script:CodexRemoteHome reset --hard --quiet "origin/$targetBranch"
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to reset repository."
   }
-  & git -C $script:ZaneHome clean -fd --quiet
+  & git -C $script:CodexRemoteHome clean -fd --quiet
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to clean repository."
   }
 
-  $after = (& git -C $script:ZaneHome rev-parse --short HEAD 2>$null).Trim()
+  $after = (& git -C $script:CodexRemoteHome rev-parse --short HEAD 2>$null).Trim()
   if (-not $after) { $after = "unknown" }
 
   if ($before -eq $after) {
@@ -266,8 +266,8 @@ function Cmd-Update() {
   if (Test-Path $script:EnvFile) {
     $dbId = Get-EnvValue "D1_DATABASE_ID"
     if ($dbId) {
-      Update-DatabaseIdToml (Join-Path $script:ZaneHome "wrangler.toml") $dbId
-      Update-DatabaseIdToml (Join-Path $script:ZaneHome "services/orbit/wrangler.toml") $dbId
+      Update-DatabaseIdToml (Join-Path $script:CodexRemoteHome "wrangler.toml") $dbId
+      Update-DatabaseIdToml (Join-Path $script:CodexRemoteHome "services/orbit/wrangler.toml") $dbId
     }
   }
 
@@ -290,12 +290,12 @@ function Cmd-Update() {
         throw "wrangler not found. Install with: bun add -g wrangler"
       }
       if (-not $vapidPublic) {
-        throw "VAPID_PUBLIC_KEY is missing in $script:EnvFile. Run 'zane self-host'."
+        throw "VAPID_PUBLIC_KEY is missing in $script:EnvFile. Run 'codex-remote self-host'."
       }
 
       Write-Host "Rebuilding web..."
       Invoke-Retry 3 3 "Web dependency install" {
-        Push-Location $script:ZaneHome
+        Push-Location $script:CodexRemoteHome
         try {
           & bun install --silent
         }
@@ -305,7 +305,7 @@ function Cmd-Update() {
       }
 
       Invoke-WithEnv @{ AUTH_URL = $authUrl; VAPID_PUBLIC_KEY = $vapidPublic } {
-        Push-Location $script:ZaneHome
+        Push-Location $script:CodexRemoteHome
         try {
           & bun run build
         }
@@ -319,9 +319,9 @@ function Cmd-Update() {
 
       Write-Host "Deploying web..."
       Invoke-WithEnv @{ CI = "true" } {
-        Push-Location $script:ZaneHome
+        Push-Location $script:CodexRemoteHome
         try {
-          & wrangler pages deploy dist --project-name zane --commit-dirty=true
+          & wrangler pages deploy dist --project-name codex-remote --commit-dirty=true
         }
         finally {
           Pop-Location
@@ -333,7 +333,7 @@ function Cmd-Update() {
 
       Write-Host "Deploying orbit..."
       Invoke-Retry 3 3 "Orbit dependency install" {
-        Push-Location (Join-Path $script:ZaneHome "services/orbit")
+        Push-Location (Join-Path $script:CodexRemoteHome "services/orbit")
         try {
           & bun install --silent
         }
@@ -342,7 +342,7 @@ function Cmd-Update() {
         }
       }
 
-      Push-Location (Join-Path $script:ZaneHome "services/orbit")
+      Push-Location (Join-Path $script:CodexRemoteHome "services/orbit")
       try {
         & wrangler deploy
       }
@@ -359,23 +359,23 @@ function Cmd-Update() {
 }
 
 function Cmd-SelfHost() {
-  $scriptPath = Join-Path $script:ZaneHome "bin/self-host.ps1"
+  $scriptPath = Join-Path $script:CodexRemoteHome "bin/self-host.ps1"
   if (-not (Test-Path $scriptPath)) {
     throw "self-host wizard not found at $scriptPath"
   }
   # Ensure self-host script uses the same resolved home as this CLI invocation.
-  $env:ZANE_HOME = $script:ZaneHome
+  $env:CODEX_REMOTE_HOME = $script:CodexRemoteHome
   & $scriptPath
   exit $LASTEXITCODE
 }
 
 function Cmd-Uninstall() {
   Write-Host ""
-  Write-Host "Uninstall Zane" -ForegroundColor Cyan
+  Write-Host "Uninstall Codex Remote" -ForegroundColor Cyan
   Write-Host ""
   Write-Host "This will remove:"
-  Write-Host "  $script:ZaneHome"
-  Write-Host "  PATH entries for zane"
+  Write-Host "  $script:CodexRemoteHome"
+  Write-Host "  PATH entries for codex-remote"
   Write-Host ""
 
   $confirm = Read-Host "Are you sure? [y/N]"
@@ -384,38 +384,38 @@ function Cmd-Uninstall() {
     return
   }
 
-  if (Test-Path $script:ZaneHome) {
-    Remove-Item $script:ZaneHome -Recurse -Force
-    Write-Host "Removed $script:ZaneHome"
+  if (Test-Path $script:CodexRemoteHome) {
+    Remove-Item $script:CodexRemoteHome -Recurse -Force
+    Write-Host "Removed $script:CodexRemoteHome"
   }
 
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
   if ($userPath) {
-    $target = (Join-Path $script:ZaneHome "bin").ToLowerInvariant()
+    $target = (Join-Path $script:CodexRemoteHome "bin").ToLowerInvariant()
     $parts = $userPath.Split(";") | Where-Object { $_ -and ($_.Trim().ToLowerInvariant() -ne $target) }
     [Environment]::SetEnvironmentVariable("Path", ($parts -join ";"), "User")
   }
 
   Write-Host ""
-  Write-Host "Zane has been uninstalled."
+  Write-Host "Codex Remote has been uninstalled."
 }
 
 function Cmd-Version() {
-  if (Test-Path (Join-Path $script:ZaneHome ".git")) {
-    $tag = (& git -C $script:ZaneHome describe --tags --always 2>$null).Trim()
+  if (Test-Path (Join-Path $script:CodexRemoteHome ".git")) {
+    $tag = (& git -C $script:CodexRemoteHome describe --tags --always 2>$null).Trim()
     if (-not $tag) { $tag = "dev" }
-    Write-Host "zane $tag"
+    Write-Host "codex-remote $tag"
   }
   else {
-    Write-Host "zane dev"
+    Write-Host "codex-remote dev"
   }
 }
 
 function Cmd-Help() {
   Write-Host ""
-  Write-Host "Zane - local AI assistant bridge" -ForegroundColor Cyan
+  Write-Host "Codex Remote - local AI assistant bridge" -ForegroundColor Cyan
   Write-Host ""
-  Write-Host "Usage: zane <command>"
+  Write-Host "Usage: codex-remote <command>"
   Write-Host ""
   Write-Host "Commands:"
   Write-Host "  start       Start the anchor service"
@@ -424,7 +424,7 @@ function Cmd-Help() {
   Write-Host "  config      Open .env in your editor"
   Write-Host "  update      Pull latest code and reinstall dependencies"
   Write-Host "  self-host   Run the self-host setup wizard"
-  Write-Host "  uninstall   Remove Zane from your system"
+  Write-Host "  uninstall   Remove Codex Remote from your system"
   Write-Host "  version     Print version"
   Write-Host "  help        Show this help"
   Write-Host ""

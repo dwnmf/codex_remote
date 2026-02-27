@@ -10,8 +10,8 @@ export function getRoleFromPath(pathname: string): Role | null {
 export async function isAuthorised(req: Request, env: Env, role: Role): Promise<AuthResult> {
   const denied: AuthResult = { authorised: false, userId: null, jwtType: null };
 
-  const userSecret = env.ZANE_WEB_JWT_SECRET?.trim();
-  const anchorSecret = env.ZANE_ANCHOR_JWT_SECRET?.trim();
+  const userSecret = env.CODEX_REMOTE_WEB_JWT_SECRET?.trim();
+  const anchorSecret = env.CODEX_REMOTE_ANCHOR_JWT_SECRET?.trim();
   if (role === "client" && !userSecret) {
     console.error("[orbit] auth: web secret not configured, denying client request");
     return denied;
