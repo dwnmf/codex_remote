@@ -27,12 +27,25 @@
   );
   const canConnect = $derived(socket.status === "disconnected" || socket.status === "error");
   const isSocketConnected = $derived(socket.status === "connected");
+  const canManageCodexConfig = $derived(auth.isLocalMode || Boolean(selectedAnchorId));
   const connectionActionLabel = $derived.by(() => {
     if (socket.status === "connecting") return "Cancel";
     if (socket.status === "reconnecting") return "Stop reconnect";
     if (socket.status === "connected") return "Disconnect";
     return "Connect";
   });
+
+  let codexConfigPath = $state("");
+  let codexConfigCandidates = $state<string[]>([]);
+  let codexConfigPlatform = $state("");
+  let codexConfigExists = $state(false);
+  let codexConfigContent = $state("");
+  let codexConfigLoading = $state(false);
+  let codexConfigSaving = $state(false);
+  let codexConfigDirty = $state(false);
+  let codexConfigError = $state<string | null>(null);
+  let codexConfigInfo = $state<string | null>(null);
+  let codexConfigLoadedFor = $state<string | null>(null);
 
   function formatSince(iso: string): string {
     const date = new Date(iso);
@@ -47,6 +60,108 @@
   function handleSelectAnchor(anchorId: string) {
     anchors.select(anchorId);
   }
+
+  function resolveConfigTargetKey(): string {
+    if (auth.isLocalMode) return "local";
+    if (!selectedAnchorId) return "anchor:none";
+    return `anchor:${selectedAnchorId}`;
+  }
+
+  function resolveAnchorIdForConfig(): string | undefined {
+    if (auth.isLocalMode) return undefined;
+    const candidate = selectedAnchorId?.trim();
+    return candidate ? candidate : undefined;
+  }
+
+  async function loadCodexConfig(path?: string, force = false) {
+    if (!isSocketConnected) {
+      codexConfigError = "Connect first to load config.toml.";
+      return;
+    }
+    if (!canManageCodexConfig) {
+      codexConfigError = "Select a device to load config.toml.";
+      return;
+    }
+    if (codexConfigDirty && !force && !path) {
+      codexConfigInfo = "Unsaved changes detected. Save or reload to discard.";
+      return;
+    }
+
+    codexConfigLoading = true;
+    codexConfigError = null;
+    codexConfigInfo = null;
+    try {
+      const result = await socket.readCodexConfig(path, resolveAnchorIdForConfig());
+      codexConfigPath = result.path;
+      codexConfigCandidates = result.candidates;
+      codexConfigPlatform = platformLabels[result.platform] ?? result.platform;
+      codexConfigExists = result.exists;
+      codexConfigContent = result.content;
+      codexConfigDirty = false;
+      codexConfigLoadedFor = resolveConfigTargetKey();
+      codexConfigInfo = result.exists
+        ? `Loaded ${result.path}`
+        : `config.toml not found. It will be created at ${result.path} when you save.`;
+    } catch (err) {
+      codexConfigError = err instanceof Error ? err.message : "Failed to load config.toml";
+    } finally {
+      codexConfigLoading = false;
+    }
+  }
+
+  async function saveCodexConfig() {
+    if (!isSocketConnected) {
+      codexConfigError = "Connect first to save config.toml.";
+      return;
+    }
+    if (!canManageCodexConfig) {
+      codexConfigError = "Select a device to save config.toml.";
+      return;
+    }
+    if (!codexConfigPath.trim()) {
+      codexConfigError = "config.toml path is empty.";
+      return;
+    }
+
+    codexConfigSaving = true;
+    codexConfigError = null;
+    codexConfigInfo = null;
+    try {
+      const result = await socket.writeCodexConfig(codexConfigContent, codexConfigPath, resolveAnchorIdForConfig());
+      codexConfigPath = result.path;
+      if (!codexConfigCandidates.includes(result.path)) {
+        codexConfigCandidates = [result.path, ...codexConfigCandidates];
+      }
+      codexConfigExists = true;
+      codexConfigDirty = false;
+      codexConfigLoadedFor = resolveConfigTargetKey();
+      codexConfigInfo = `Saved ${result.path}`;
+    } catch (err) {
+      codexConfigError = err instanceof Error ? err.message : "Failed to save config.toml";
+    } finally {
+      codexConfigSaving = false;
+    }
+  }
+
+  function handleConfigContentInput(value: string) {
+    codexConfigContent = value;
+    codexConfigDirty = true;
+    codexConfigInfo = null;
+  }
+
+  function handleConfigPathSelect(path: string) {
+    if (!path || path === codexConfigPath) return;
+    void loadCodexConfig(path, true);
+  }
+
+  $effect(() => {
+    if (!isSocketConnected) return;
+    if (!canManageCodexConfig) return;
+    const targetKey = resolveConfigTargetKey();
+    if (codexConfigLoadedFor === targetKey) return;
+    if (codexConfigDirty) return;
+    void loadCodexConfig(undefined, true);
+  });
 
 </script>
 
@@ -158,12 +273,100 @@
       </div>
     </div>
 
+    <div class="section stack">
+      <div class="section-header">
+        <span class="section-index">03</span>
+        <span class="section-title">Codex Config</span>
+      </div>
+      <div class="section-body stack">
+        {#if !isSocketConnected}
+          <p class="hint">Connect first to read and edit <code>config.toml</code>.</p>
+        {:else if !canManageCodexConfig}
+          <p class="hint">Select a device to edit <code>config.toml</code> on that machine.</p>
+        {:else}
+          <div class="field stack">
+            <label for="codex-config-path">config.toml path</label>
+            {#if codexConfigCandidates.length > 1}
+              <select
+                id="codex-config-path"
+                value={codexConfigPath}
+                onchange={(e) => handleConfigPathSelect((e.currentTarget as HTMLSelectElement).value)}
+                disabled={codexConfigLoading || codexConfigSaving}
+              >
+                {#each codexConfigCandidates as path}
+                  <option value={path}>{path}</option>
+                {/each}
+              </select>
+            {:else}
+              <input
+                id="codex-config-path"
+                type="text"
+                value={codexConfigPath}
+                readonly
+                disabled
+              />
+            {/if}
+          </div>
+
+          {#if codexConfigPlatform}
+            <p class="hint">Detected OS: {codexConfigPlatform}</p>
+          {/if}
+          <p class="hint">
+            {codexConfigExists
+              ? "Editing existing file."
+              : "File does not exist yet; Save will create it."}
+          </p>
+
+          <div class="field stack">
+            <label for="codex-config-content">Contents</label>
+            <textarea
+              id="codex-config-content"
+              class="config-editor"
+              value={codexConfigContent}
+              oninput={(e) => handleConfigContentInput((e.currentTarget as HTMLTextAreaElement).value)}
+              placeholder={'model = "o3"\napproval_policy = "on-request"\nsandbox_mode = "workspace-write"'}
+              spellcheck="false"
+              disabled={codexConfigLoading || codexConfigSaving}
+            ></textarea>
+          </div>
+
+          <div class="connect-actions row">
+            <button
+              class="action-btn"
+              type="button"
+              onclick={() => loadCodexConfig(undefined, true)}
+              disabled={codexConfigLoading || codexConfigSaving}
+            >
+              {codexConfigLoading ? "Loading..." : "Reload"}
+            </button>
+            <button
+              class="action-btn"
+              type="button"
+              onclick={saveCodexConfig}
+              disabled={codexConfigLoading || codexConfigSaving || !codexConfigPath || !codexConfigDirty}
+            >
+              {codexConfigSaving ? "Saving..." : "Save"}
+            </button>
+          </div>
+          {#if codexConfigDirty}
+            <p class="hint">Unsaved changes.</p>
+          {/if}
+          {#if codexConfigInfo}
+            <p class="hint hint-local">{codexConfigInfo}</p>
+          {/if}
+          {#if codexConfigError}
+            <p class="hint hint-error">{codexConfigError}</p>
+          {/if}
+        {/if}
+      </div>
+    </div>
+
     <NotificationSettings />
 
     {#if !auth.isLocalMode}
       <div class="section stack">
         <div class="section-header">
-          <span class="section-index">04</span>
+          <span class="section-index">05</span>
           <span class="section-title">Account</span>
         </div>
         <div class="section-body stack">
@@ -286,12 +489,48 @@
     font-size: var(--text-sm);
   }
 
-  .field input:focus {
+  .field select {
+    padding: 0.55rem 0.62rem;
+    background: var(--cli-bg);
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-md);
+    color: var(--cli-text);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+  }
+
+  .field input:focus,
+  .field select:focus {
     outline: none;
     border-color: var(--cli-prefix-agent);
   }
 
-  .field input:disabled {
+  .field input:disabled,
+  .field select:disabled {
+    opacity: 0.6;
+    background: var(--cli-bg-elevated);
+  }
+
+  .config-editor {
+    min-height: 13rem;
+    width: 100%;
+    padding: 0.62rem 0.68rem;
+    background: var(--cli-bg);
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-md);
+    color: var(--cli-text);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: 1.45;
+    resize: vertical;
+  }
+
+  .config-editor:focus {
+    outline: none;
+    border-color: var(--cli-prefix-agent);
+  }
+
+  .config-editor:disabled {
     opacity: 0.6;
     background: var(--cli-bg-elevated);
   }

@@ -13,6 +13,7 @@
     ulwLoopRunner,
     ulwRuntime,
   } from "../lib/ulw";
+  import { buildBangTerminalPrompt, parseBangTerminalCommand } from "../lib/bang-command";
   import AppHeader from "../lib/components/AppHeader.svelte";
   import HomeTaskComposer from "../lib/components/HomeTaskComposer.svelte";
   import WorktreeModal from "../lib/components/WorktreeModal.svelte";
@@ -219,6 +220,17 @@
       return null;
     }
 
+    const bangCommand = parseBangTerminalCommand(normalizedInput);
+    if (bangCommand) {
+      if (!bangCommand.command) {
+        return "Usage: !<command> or !pwsh|cmd|bash|sh|zsh|fish <command>";
+      }
+      if (ulwRuntime.isActive(pane.threadId)) {
+        ulwLoopRunner.stop(pane.threadId, "manual_user_input");
+      }
+      return sendTurnFromPane(paneId, pane.threadId, buildBangTerminalPrompt(bangCommand));
+    }
+
     if (ulwRuntime.isActive(pane.threadId)) {
       ulwLoopRunner.stop(pane.threadId, "manual_user_input");
     }
@@ -342,12 +354,17 @@
 
     if (pane.pendingStartToken !== null) return;
     const ulwCommand = parseUlwCommand(rawInput);
+    const bangCommand = ulwCommand ? null : parseBangTerminalCommand(rawInput);
     if (ulwCommand?.kind === "stop") {
       updatePane(paneId, { submitError: "Use /u stop inside an active window terminal." });
       return;
     }
     if (ulwCommand?.kind === "config") {
       updatePane(paneId, { submitError: "Start a window session first, then run /u config." });
+      return;
+    }
+    if (bangCommand && !bangCommand.command) {
+      updatePane(paneId, { submitError: "Usage: !<command> or !pwsh|cmd|bash|sh|zsh|fish <command>" });
       return;
     }
 
@@ -363,7 +380,11 @@
         ? threads.resolveCollaborationMode(pane.mode, effectiveModel, "medium")
         : undefined;
 
-      const startInput = ulwCommand?.kind === "start" ? undefined : rawInput;
+      const startInput = ulwCommand?.kind === "start"
+        ? undefined
+        : bangCommand
+          ? buildBangTerminalPrompt(bangCommand)
+          : rawInput;
       threads.start(pane.project.trim(), startInput, {
         suppressNavigation: true,
         ...(collaborationMode ? { collaborationMode } : {}),
@@ -590,7 +611,7 @@
                   >
                     <input
                       type="text"
-                      placeholder="Type message or /u command for this window"
+                      placeholder="Type message, !command, or /u command for this window"
                       value={pane.terminalInput}
                       oninput={(e) => handleTerminalInputChange(pane.id, (e.currentTarget as HTMLInputElement).value)}
                       disabled={!pane.threadId || !isConnected || paneIsRunning(pane)}

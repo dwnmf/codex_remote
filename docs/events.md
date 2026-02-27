@@ -25,6 +25,8 @@ These methods are handled by Anchor directly and do not go through `codex app-se
 | `anchor.git.worktree.create` | `{ repoRoot, baseRef?, branchName?, path? }` | Creates a worktree, optionally auto-generating branch/path. |
 | `anchor.git.worktree.remove` | `{ repoRoot, path, force? }` | Removes a worktree (`force` uses `--force`). |
 | `anchor.git.worktree.prune` | `{ repoRoot }` | Runs `git worktree prune`; returns `{ prunedCount }`. |
+| `anchor.config.read` | `{ path?, anchorId? }` | Reads Codex `config.toml`, returning `{ path, exists, content, candidates[], platform }`. |
+| `anchor.config.write` | `{ content, path?, anchorId? }` | Writes Codex `config.toml`, returning `{ saved, path, bytes }`. |
 
 ### Turn Control
 

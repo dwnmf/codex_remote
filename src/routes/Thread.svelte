@@ -14,6 +14,7 @@
         ulwLoopRunner,
         ulwRuntime,
     } from "../lib/ulw";
+    import { buildBangTerminalPrompt, parseBangTerminalCommand } from "../lib/bang-command";
     import AppHeader from "../lib/components/AppHeader.svelte";
     import MessageBlock from "../lib/components/MessageBlock.svelte";
     import ApprovalPrompt from "../lib/components/ApprovalPrompt.svelte";
@@ -199,6 +200,21 @@
                 sendTurn: sendTurnText,
                 onTurnComplete: messages.onTurnComplete.bind(messages),
             });
+            return;
+        }
+
+        const bangCommand = parseBangTerminalCommand(normalizedInput);
+        if (bangCommand) {
+            if (!bangCommand.command) {
+                sendError = "Usage: !<command> or !pwsh|cmd|bash|sh|zsh|fish <command>";
+                return;
+            }
+
+            if (ulwRuntime.isActive(threadId)) {
+                ulwLoopRunner.stop(threadId, "manual_user_input");
+            }
+
+            sendTurnText(threadId, buildBangTerminalPrompt(bangCommand));
             return;
         }
 

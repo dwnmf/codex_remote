@@ -111,7 +111,7 @@
     <textarea
       bind:value={input}
       onkeydown={handleKeydown}
-      placeholder="What would you like to do? (tip: /u <task>)"
+      placeholder="What would you like to do? (tip: !<command> or /u <task>)"
       rows="1"
       {disabled}
     ></textarea>

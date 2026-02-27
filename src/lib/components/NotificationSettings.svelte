@@ -13,7 +13,7 @@
 
 <div class="section stack">
   <div class="section-header">
-    <span class="section-index">03</span>
+    <span class="section-index">04</span>
     <span class="section-title">Notifications</span>
   </div>
   <div class="section-body stack">

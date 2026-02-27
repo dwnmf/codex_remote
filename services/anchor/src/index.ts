@@ -1,6 +1,6 @@
 import { hostname, homedir } from "node:os";
-import { mkdir, readdir } from "node:fs/promises";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import type { WsClient } from "./types";
 
@@ -44,22 +44,178 @@ const APPROVAL_METHODS = new Set([
 ]);
 const pendingApprovals = new Map<string, string>(); // threadId → raw JSON line
 const approvalRpcIds = new Map<number | string, string>(); // rpcId → threadId (for cleanup on response)
+let filesystemRootsCache: string[] | null = null;
+
+interface CodexConfigResolution {
+  path: string;
+  exists: boolean;
+  candidates: string[];
+}
+
+async function listFilesystemRoots(): Promise<string[]> {
+  if (filesystemRootsCache) {
+    return filesystemRootsCache;
+  }
+
+  if (process.platform === "win32") {
+    const roots: string[] = [];
+    for (let code = 65; code <= 90; code += 1) {
+      const drive = `${String.fromCharCode(code)}:\\`;
+      try {
+        await readdir(drive);
+        roots.push(drive);
+      } catch {
+        // Ignore drives that do not exist or are not accessible.
+      }
+    }
+    filesystemRootsCache = roots.length > 0 ? roots : ["C:\\"];
+    return filesystemRootsCache;
+  }
+
+  filesystemRootsCache = ["/"];
+  return filesystemRootsCache;
+}
 
 async function handleListDirs(
   id: number | string,
   params: JsonObject | null,
 ): Promise<JsonObject> {
   const raw = params?.path;
-  const targetPath = typeof raw === "string" && raw.trim() ? raw.trim() : homedir();
+  const rawStart = params?.startPath;
+  const explicitPath = typeof raw === "string" && raw.trim() ? raw.trim() : "";
+  const startPath = typeof rawStart === "string" && rawStart.trim() ? rawStart.trim() : "";
+  const targetPath = explicitPath || startPath || homedir();
   try {
     const entries = await readdir(targetPath, { withFileTypes: true });
     const dirs = entries
       .filter((e) => e.isDirectory() && !e.name.startsWith("."))
       .map((e) => e.name)
       .sort((a, b) => a.localeCompare(b));
-    return { id, result: { dirs, parent: dirname(targetPath), current: targetPath } };
+    const roots = await listFilesystemRoots();
+    return { id, result: { dirs, parent: dirname(targetPath), current: targetPath, roots } };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to list directory";
+    return { id, error: { code: -1, message } };
+  }
+}
+
+function uniquePaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const entry of paths) {
+    const normalized = normalizeAbsolutePath(entry);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function buildCodexConfigCandidates(): string[] {
+  const home = homedir();
+  const envPath = (process.env.CODEX_CONFIG_PATH ?? "").trim();
+  const xdgConfigHome = (process.env.XDG_CONFIG_HOME ?? "").trim();
+  const appData = (process.env.APPDATA ?? "").trim();
+  const localAppData = (process.env.LOCALAPPDATA ?? "").trim();
+
+  const candidates: string[] = [];
+  if (envPath) {
+    candidates.push(isAbsolute(envPath) ? envPath : resolve(home, envPath));
+  }
+
+  if (process.platform === "win32") {
+    candidates.push(join(home, ".codex", "config.toml"));
+    if (appData) candidates.push(join(appData, "codex", "config.toml"));
+    if (localAppData) candidates.push(join(localAppData, "codex", "config.toml"));
+    candidates.push(join(home, ".config", "codex", "config.toml"));
+  } else {
+    candidates.push(join(home, ".codex", "config.toml"));
+    if (xdgConfigHome) candidates.push(join(xdgConfigHome, "codex", "config.toml"));
+    candidates.push(join(home, ".config", "codex", "config.toml"));
+  }
+
+  return uniquePaths(candidates);
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveCodexConfigPath(pathParam: string | null): Promise<CodexConfigResolution> {
+  const baseCandidates = buildCodexConfigCandidates();
+  const preferredPath =
+    pathParam && pathParam.trim()
+      ? ensureAbsolutePath(pathParam, "path")
+      : null;
+  if (preferredPath && basename(preferredPath).toLowerCase() !== "config.toml") {
+    throw new Error("path must point to config.toml");
+  }
+
+  const candidates = uniquePaths(preferredPath ? [preferredPath, ...baseCandidates] : baseCandidates);
+  if (candidates.length === 0) {
+    throw new Error("No config.toml candidates resolved");
+  }
+
+  for (const candidate of candidates) {
+    if (await fileExists(candidate)) {
+      return { path: candidate, exists: true, candidates };
+    }
+  }
+
+  return { path: candidates[0], exists: false, candidates };
+}
+
+async function handleCodexConfigRead(
+  id: number | string,
+  params: JsonObject | null,
+): Promise<JsonObject> {
+  try {
+    const pathParam = typeof params?.path === "string" ? params.path : null;
+    const resolved = await resolveCodexConfigPath(pathParam);
+    const content = resolved.exists ? await readFile(resolved.path, "utf8") : "";
+    return {
+      id,
+      result: {
+        path: resolved.path,
+        exists: resolved.exists,
+        content,
+        candidates: resolved.candidates,
+        platform: process.platform,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to read config.toml";
+    return { id, error: { code: -1, message } };
+  }
+}
+
+async function handleCodexConfigWrite(
+  id: number | string,
+  params: JsonObject | null,
+): Promise<JsonObject> {
+  try {
+    if (typeof params?.content !== "string") {
+      throw new Error("content is required");
+    }
+    const pathParam = typeof params?.path === "string" ? params.path : null;
+    const resolved = await resolveCodexConfigPath(pathParam);
+    await mkdir(dirname(resolved.path), { recursive: true });
+    await writeFile(resolved.path, params.content, "utf8");
+    return {
+      id,
+      result: {
+        saved: true,
+        path: resolved.path,
+        bytes: new TextEncoder().encode(params.content).length,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to write config.toml";
     return { id, error: { code: -1, message } };
   }
 }
@@ -280,10 +436,14 @@ async function handleGitWorktreeCreate(id: number | string, params: JsonObject |
       : "HEAD";
 
     const rawPath = typeof params?.path === "string" ? params.path.trim() : "";
+    const rawRootDir = typeof params?.rootDir === "string" ? params.rootDir.trim() : "";
     const repoName = basename(resolvedRepoRoot);
+    const rootDir = rawRootDir
+      ? ensureAbsolutePath(rawRootDir, "rootDir")
+      : normalizeAbsolutePath(`${homedir()}/.codex-remote/worktrees`);
     const worktreePath = rawPath
       ? ensureAbsolutePath(rawPath, "path")
-      : normalizeAbsolutePath(`${homedir()}/.codex-remote/worktrees/${repoName}/${branch}`);
+      : normalizeAbsolutePath(resolve(rootDir, repoName, branch));
 
     await mkdir(dirname(worktreePath), { recursive: true });
 
@@ -395,6 +555,12 @@ async function maybeHandleAnchorLocalRpc(message: JsonObject): Promise<JsonObjec
   }
   if (message.method === "anchor.git.worktree.prune") {
     return handleGitWorktreePrune(id, params);
+  }
+  if (message.method === "anchor.config.read") {
+    return handleCodexConfigRead(id, params);
+  }
+  if (message.method === "anchor.config.write") {
+    return handleCodexConfigWrite(id, params);
   }
 
   return null;

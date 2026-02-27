@@ -41,6 +41,7 @@ export interface ListDirsResult {
   dirs: string[];
   parent: string;
   current: string;
+  roots?: string[];
 }
 
 export interface GitWorktreeRemoveResult {
@@ -49,6 +50,20 @@ export interface GitWorktreeRemoveResult {
 
 export interface GitWorktreePruneResult {
   prunedCount: number;
+}
+
+export interface CodexConfigReadResult {
+  path: string;
+  exists: boolean;
+  content: string;
+  candidates: string[];
+  platform: string;
+}
+
+export interface CodexConfigWriteResult {
+  saved: boolean;
+  path: string;
+  bytes: number;
 }
 
 class SocketStore {
@@ -240,14 +255,14 @@ class SocketStore {
     return this.#sendRaw({ type: "orbit.list-anchors" });
   }
 
-  listDirs(path?: string): Promise<ListDirsResult> {
+  listDirs(path?: string, startPath?: string): Promise<ListDirsResult> {
     const id = `dir-${++this.#rpcIdCounter}`;
     return new Promise((resolve, reject) => {
       this.#pendingRpc.set(id, {
         resolve: (v) => resolve(v as ListDirsResult),
         reject,
       });
-      const result = this.send({ id, method: "anchor.listDirs", params: { path: path ?? "" } });
+      const result = this.send({ id, method: "anchor.listDirs", params: { path: path ?? "", startPath: startPath ?? "" } });
       if (!result.success) {
         this.#pendingRpc.delete(id);
         reject(new Error(result.error ?? "Not connected"));
@@ -343,6 +358,51 @@ class SocketStore {
     this.#intentionalDisconnect = false;
     this.#clearReconnectTimeout();
     this.#connect(this.#url);
+  }
+
+  readCodexConfig(path?: string, anchorId?: string): Promise<CodexConfigReadResult> {
+    const id = `codex-config-read-${++this.#rpcIdCounter}`;
+    return new Promise((resolve, reject) => {
+      this.#pendingRpc.set(id, {
+        resolve: (v) => resolve(v as CodexConfigReadResult),
+        reject,
+      });
+      const result = this.send({
+        id,
+        method: "anchor.config.read",
+        params: {
+          ...(path?.trim() ? { path: path.trim() } : {}),
+          ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+        },
+      });
+      if (!result.success) {
+        this.#pendingRpc.delete(id);
+        reject(new Error(result.error ?? "Not connected"));
+      }
+    });
+  }
+
+  writeCodexConfig(content: string, path?: string, anchorId?: string): Promise<CodexConfigWriteResult> {
+    const id = `codex-config-write-${++this.#rpcIdCounter}`;
+    return new Promise((resolve, reject) => {
+      this.#pendingRpc.set(id, {
+        resolve: (v) => resolve(v as CodexConfigWriteResult),
+        reject,
+      });
+      const result = this.send({
+        id,
+        method: "anchor.config.write",
+        params: {
+          content,
+          ...(path?.trim() ? { path: path.trim() } : {}),
+          ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+        },
+      });
+      if (!result.success) {
+        this.#pendingRpc.delete(id);
+        reject(new Error(result.error ?? "Not connected"));
+      }
+    });
   }
 
   subscribeThread(threadId: string): SendResult {
