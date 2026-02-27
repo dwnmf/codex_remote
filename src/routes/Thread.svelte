@@ -438,8 +438,15 @@
 <style>
     .thread-page {
         --stack-gap: 0;
+        --thread-user-text: #1a1a1a;
+        --thread-agent-text: var(--cli-text-dim);
         min-height: 100vh;
         background: var(--cli-bg);
+    }
+
+    :global(:root[data-theme="dark"]) .thread-page {
+        --thread-user-text: var(--cli-text);
+        --thread-agent-text: var(--cli-text-dim);
     }
 
     .thread-main {
@@ -522,27 +529,22 @@
     .thread-console {
         --stack-gap: 0;
         border: 1px solid color-mix(in srgb, var(--cli-border) 72%, transparent);
-        border-radius: var(--radius-lg);
-        background:
-            linear-gradient(
-                180deg,
-                color-mix(in srgb, var(--cli-bg-elevated) 90%, transparent),
-                color-mix(in srgb, var(--cli-bg) 92%, transparent)
-            );
+        border-radius: var(--radius-md);
+        background: color-mix(in srgb, var(--cli-bg-elevated) 90%, transparent);
         overflow: hidden;
-        min-height: min(72vh, 980px);
+        min-height: min(68vh, 900px);
     }
 
     :global(:root[data-theme="light"]) .thread-console {
-        box-shadow: var(--shadow-md);
+        box-shadow: var(--shadow-sm);
     }
 
     .transcript {
         flex: 1;
         overflow-y: auto;
         overflow-x: hidden;
-        min-height: 18rem;
-        padding: var(--space-sm) 0 var(--space-md);
+        min-height: 16rem;
+        padding: 0.4rem 0 0.48rem;
         background: transparent;
     }
 
@@ -568,7 +570,242 @@
     }
 
     .composer :global(textarea) {
-        min-height: 3.6rem;
+        min-height: 2.6rem;
+    }
+
+    .thread-page :global(.message-block) {
+        margin: 0;
+        padding: 0.2rem var(--space-md);
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        font-family: var(--font-sans);
+        font-size: 0.9rem;
+        line-height: 1.56;
+    }
+
+    .thread-page :global(.message-block.user-bg) {
+        margin: 0;
+        padding: 0.2rem var(--space-md);
+        border: 0;
+        background: transparent;
+    }
+
+    .thread-page :global(.message-block.user-bg .prefix) {
+        display: none;
+    }
+
+    .thread-page :global(.message-block .prefix) {
+        font-family: var(--font-mono);
+        font-size: 0.66rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--cli-text-muted);
+    }
+
+    .thread-page :global(.message-block .text) {
+        font-family: var(--font-sans);
+        font-weight: 450;
+        font-size: 0.93rem;
+        letter-spacing: 0.002em;
+        color: var(--thread-agent-text);
+    }
+
+    .thread-page :global(.message-block.user-bg .text) {
+        font-family: var(--font-sans);
+        font-weight: 600;
+        font-size: 0.9rem;
+        color: var(--thread-user-text);
+    }
+
+    .thread-page :global(.message-block .terminal-lines .text),
+    .thread-page :global(.message-block .wait-line .text) {
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+    }
+
+    .thread-page :global(.reasoning),
+    .thread-page :global(.tool),
+    .thread-page :global(.plan-card),
+    .thread-page :global(.approval-card),
+    .thread-page :global(.input-card),
+    .thread-page :global(.working-status) {
+        margin: 0.2rem var(--space-md);
+        border-radius: 0;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    .thread-page :global(.reasoning) {
+        padding: 0;
+    }
+
+    .thread-page :global(.reasoning-trigger) {
+        padding: 0.22rem 0;
+        color: var(--cli-text-dim);
+        font-family: var(--font-mono);
+        font-size: 0.76rem;
+        letter-spacing: 0.03em;
+    }
+
+    .thread-page :global(.reasoning-text) {
+        font-family: var(--font-editorial);
+        font-size: 0.96rem;
+        line-height: 1.6;
+    }
+
+    .thread-page :global(.tool-title),
+    .thread-page :global(.header-label) {
+        font-family: var(--font-mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+    }
+
+    .thread-page :global(.tool-content),
+    .thread-page :global(.card-body),
+    .thread-page :global(.question-section),
+    .thread-page :global(.plan-text),
+    .thread-page :global(.working-status) {
+        background: transparent;
+        border: 0;
+    }
+
+    .thread-page :global(.tool-output),
+    .thread-page :global(.command-text),
+    .thread-page :global(.description),
+    .thread-page :global(.question-text),
+    .thread-page :global(.option-desc),
+    .thread-page :global(.step-text) {
+        font-family: var(--font-sans);
+        font-size: 0.88rem;
+    }
+
+    .thread-page :global(.plan-text),
+    .thread-page :global(.plan-text p),
+    .thread-page :global(.plan-text li) {
+        font-family: var(--font-sans);
+        font-size: 0.9rem;
+        line-height: 1.5;
+    }
+
+    .thread-page :global(.prompt-input) {
+        padding: 0.1rem var(--space-md) 0.26rem;
+    }
+
+    .thread-page :global(.input-container) {
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    .thread-page :global(.input-container:focus-within) {
+        border-color: transparent;
+        box-shadow: none;
+        transform: none;
+    }
+
+    .thread-page :global(.composer-head) {
+        padding: 0.24rem 0 0.14rem;
+        border-bottom: 0;
+    }
+
+    .thread-page :global(.composer-kicker) {
+        color: var(--cli-text-dim);
+    }
+
+    .thread-page :global(.composer-whisper) {
+        color: var(--cli-text-muted);
+    }
+
+    .thread-page :global(textarea) {
+        min-height: 2.45rem;
+        padding: 0.16rem 0 0.1rem;
+        font-family: var(--font-sans);
+        font-size: 0.94rem;
+        font-weight: 500;
+        line-height: 1.35;
+        color: var(--cli-text);
+    }
+
+    .thread-page :global(textarea::placeholder) {
+        color: color-mix(in srgb, var(--cli-text-muted) 84%, transparent);
+        font-family: var(--font-sans);
+        font-size: 0.9rem;
+    }
+
+    .thread-page :global(.footer) {
+        padding: 0.12rem 0 0.06rem;
+        border-top: 0;
+        background: transparent;
+    }
+
+    .thread-page :global(.tool-btn),
+    .thread-page :global(.dropdown-item),
+    .thread-page :global(.submit-btn),
+    .thread-page :global(.stop-btn),
+    .thread-page :global(.approve-btn),
+    .thread-page :global(.option-btn),
+    .thread-page :global(.submit-btn) {
+        border-radius: 999px;
+    }
+
+    .thread-page :global(.tool-btn),
+    .thread-page :global(.dropdown-item),
+    .thread-page :global(.status-label),
+    .thread-page :global(.option-label),
+    .thread-page :global(.header-label),
+    .thread-page :global(.status-badge),
+    .thread-page :global(.label) {
+        font-family: var(--font-mono);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .thread-page :global(.tool-btn) {
+        border: 1px solid color-mix(in srgb, var(--cli-border) 66%, transparent);
+        background: transparent;
+        color: var(--cli-text-dim);
+        padding: 0.26rem 0.48rem;
+    }
+
+    .thread-page :global(.tool-btn:hover) {
+        color: var(--cli-text);
+        border-color: color-mix(in srgb, var(--cli-prefix-agent) 40%, var(--cli-border));
+        background: color-mix(in srgb, var(--cli-prefix-agent) 12%, transparent);
+    }
+
+    .thread-page :global(.dropdown-menu) {
+        border: 1px solid color-mix(in srgb, var(--cli-border) 72%, transparent);
+        border-radius: var(--radius-md);
+        background: color-mix(in srgb, var(--cli-bg) 94%, transparent);
+    }
+
+    .thread-page :global(.dropdown-item) {
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
+    }
+
+    .thread-page :global(.dropdown-item.selected) {
+        border-color: color-mix(in srgb, var(--cli-prefix-agent) 38%, var(--cli-border));
+        background: color-mix(in srgb, var(--cli-prefix-agent) 9%, transparent);
+    }
+
+    .thread-page :global(.submit-btn),
+    .thread-page :global(.stop-btn) {
+        width: 1.84rem;
+        height: 1.84rem;
+        border: 1px solid color-mix(in srgb, var(--cli-border) 64%, transparent);
+        box-shadow: none;
+    }
+
+    .thread-page :global(.submit-btn) {
+        background: var(--cli-prefix-agent);
+    }
+
+    .thread-page :global(.stop-btn) {
+        background: var(--cli-error);
     }
 
     .streaming-reasoning {

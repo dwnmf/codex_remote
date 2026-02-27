@@ -468,19 +468,180 @@ class MessagesStore {
     return value;
   }
 
-  #buildImageMessage(
-    threadId: string,
-    itemId: string,
-    item: Record<string, unknown>,
-  ): Message {
-    const imagePath = this.#toStringValue(item.path);
-    const imageUrl = this.#toStringValue(item.imageUrl) ?? this.#toStringValue(item.image_url) ?? this.#toStringValue(item.url);
-    const imageMimeType = this.#toStringValue(item.mimeType) ?? this.#toStringValue(item.mime_type);
-    const imageWidth = this.#toNumberValue(item.width);
-    const imageHeight = this.#toNumberValue(item.height);
-    const imageBytes = this.#toNumberValue(item.bytes);
+  #toRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    return value as Record<string, unknown>;
+  }
 
-    const metadata: Message["metadata"] = {
+  #toArray(value: unknown): unknown[] {
+    return Array.isArray(value) ? value : [];
+  }
+
+  #extractMarkdownImageUrl(text: string): string | null {
+    const match = text.match(/!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/);
+    if (!match?.[1]) return null;
+    return this.#toStringValue(match[1]);
+  }
+
+  #isLikelyImageUrl(value: string): boolean {
+    if (/^data:image\//i.test(value)) return true;
+    if (/^blob:/i.test(value)) return true;
+    if (!/^https?:\/\//i.test(value)) return false;
+    if (/\.(png|jpe?g|gif|webp|bmp|svg|avif|ico)(?:[?#].*)?$/i.test(value)) return true;
+    // Keep as fallback for signed URLs without extension.
+    return true;
+  }
+
+  #isLikelyImagePath(value: string): boolean {
+    const normalized = value.replace(/\\/g, "/");
+    return /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico)(?:[?#].*)?$/i.test(normalized);
+  }
+
+  #isLikelyBase64(value: string): boolean {
+    const trimmed = value.trim();
+    if (trimmed.length < 64) return false;
+    return /^[A-Za-z0-9+/=\r\n]+$/.test(trimmed);
+  }
+
+  #toDataUrlFromBase64(base64: string, mimeType: string | null): string {
+    const mime = mimeType && mimeType.startsWith("image/") ? mimeType : "image/png";
+    return `data:${mime};base64,${base64.replace(/\s+/g, "")}`;
+  }
+
+  #extractImagePayloadFromUnknown(value: unknown): {
+    imagePath?: string;
+    imageUrl?: string;
+    imageMimeType?: string;
+    imageWidth?: number;
+    imageHeight?: number;
+    imageBytes?: number;
+  } | null {
+    const seed = this.#toRecord(value);
+    if (!seed) return null;
+
+    const queue: Array<{ node: Record<string, unknown>; depth: number }> = [{ node: seed, depth: 0 }];
+    const seen = new Set<Record<string, unknown>>();
+    let imagePath: string | null = null;
+    let imageUrl: string | null = null;
+    let imageMimeType: string | null = null;
+    let imageWidth: number | null = null;
+    let imageHeight: number | null = null;
+    let imageBytes: number | null = null;
+    let imageBase64: string | null = null;
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current) continue;
+      const { node, depth } = current;
+      if (seen.has(node)) continue;
+      seen.add(node);
+
+      const mimeCandidate = this.#toStringValue(node.mimeType)
+        ?? this.#toStringValue(node.mime_type)
+        ?? this.#toStringValue(node.mime)
+        ?? this.#toStringValue(node.mediaType)
+        ?? this.#toStringValue(node.media_type);
+      if (!imageMimeType && mimeCandidate?.startsWith("image/")) {
+        imageMimeType = mimeCandidate;
+      }
+
+      if (imageWidth === null) {
+        imageWidth = this.#toNumberValue(node.width);
+      }
+      if (imageHeight === null) {
+        imageHeight = this.#toNumberValue(node.height);
+      }
+      if (imageBytes === null) {
+        imageBytes = this.#toNumberValue(node.bytes) ?? this.#toNumberValue(node.size);
+      }
+
+      const base64Candidate = this.#toStringValue(node.dataBase64)
+        ?? this.#toStringValue(node.imageBase64)
+        ?? this.#toStringValue(node.image_data)
+        ?? this.#toStringValue(node.imageData)
+        ?? this.#toStringValue(node.base64);
+      if (!imageBase64 && base64Candidate && this.#isLikelyBase64(base64Candidate)) {
+        imageBase64 = base64Candidate;
+      }
+
+      const rawDataCandidate = this.#toStringValue(node.data);
+      if (!imageBase64 && rawDataCandidate && this.#isLikelyBase64(rawDataCandidate)) {
+        imageBase64 = rawDataCandidate;
+      }
+      if (!imageUrl && rawDataCandidate && /^data:image\//i.test(rawDataCandidate.trim())) {
+        imageUrl = rawDataCandidate.trim();
+      }
+
+      const urlCandidates = [
+        node.imageUrl,
+        node.image_url,
+        node.url,
+        node.image,
+        node.src,
+        node.href,
+      ]
+        .map((candidate) => this.#toStringValue(candidate))
+        .filter((candidate): candidate is string => Boolean(candidate));
+      for (const candidate of urlCandidates) {
+        if (this.#isLikelyImageUrl(candidate)) {
+          imageUrl = imageUrl ?? candidate;
+        }
+      }
+
+      const pathCandidates = [
+        node.imagePath,
+        node.image_path,
+        node.path,
+        node.filePath,
+        node.file_path,
+        node.filename,
+        node.file,
+      ]
+        .map((candidate) => this.#toStringValue(candidate))
+        .filter((candidate): candidate is string => Boolean(candidate));
+      for (const candidate of pathCandidates) {
+        if (this.#isLikelyImagePath(candidate)) {
+          imagePath = imagePath ?? candidate;
+        }
+      }
+
+      const textCandidates = [
+        node.text,
+        node.caption,
+        node.message,
+        node.markdown,
+      ]
+        .map((candidate) => this.#toStringValue(candidate))
+        .filter((candidate): candidate is string => Boolean(candidate));
+      for (const text of textCandidates) {
+        const markdownImageUrl = this.#extractMarkdownImageUrl(text);
+        if (markdownImageUrl && this.#isLikelyImageUrl(markdownImageUrl)) {
+          imageUrl = imageUrl ?? markdownImageUrl;
+        }
+      }
+
+      if (depth >= 3) continue;
+      for (const nestedValue of Object.values(node)) {
+        const nestedRecord = this.#toRecord(nestedValue);
+        if (nestedRecord) {
+          queue.push({ node: nestedRecord, depth: depth + 1 });
+          continue;
+        }
+        for (const nestedArrayEntry of this.#toArray(nestedValue)) {
+          const nestedItem = this.#toRecord(nestedArrayEntry);
+          if (nestedItem) {
+            queue.push({ node: nestedItem, depth: depth + 1 });
+          }
+        }
+      }
+    }
+
+    if (!imageUrl && imageBase64) {
+      imageUrl = this.#toDataUrlFromBase64(imageBase64, imageMimeType);
+    }
+
+    if (!imagePath && !imageUrl) return null;
+    return {
       ...(imagePath ? { imagePath } : {}),
       ...(imageUrl ? { imageUrl } : {}),
       ...(imageMimeType ? { imageMimeType } : {}),
@@ -488,8 +649,105 @@ class MessagesStore {
       ...(imageHeight !== null ? { imageHeight } : {}),
       ...(imageBytes !== null ? { imageBytes } : {}),
     };
+  }
 
-    const source = imagePath ?? imageUrl ?? "unknown";
+  #extractImagePayloadFromString(value: string): {
+    imagePath?: string;
+    imageUrl?: string;
+    imageMimeType?: string;
+    imageWidth?: number;
+    imageHeight?: number;
+    imageBytes?: number;
+  } | null {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    if (/^data:image\//i.test(trimmed)) {
+      return { imageUrl: trimmed };
+    }
+
+    if (this.#isLikelyBase64(trimmed)) {
+      return { imageUrl: this.#toDataUrlFromBase64(trimmed, null) };
+    }
+
+    const markdownImageUrl = this.#extractMarkdownImageUrl(trimmed);
+    if (markdownImageUrl && this.#isLikelyImageUrl(markdownImageUrl)) {
+      return { imageUrl: markdownImageUrl };
+    }
+
+    const dataUrlMatch = trimmed.match(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\r\n]+/);
+    if (dataUrlMatch?.[0]) {
+      return { imageUrl: dataUrlMatch[0] };
+    }
+
+    try {
+      if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+        const parsed = JSON.parse(trimmed) as unknown;
+        const parsedPayload = this.#extractImagePayloadFromUnknown(parsed);
+        if (parsedPayload) return parsedPayload;
+      }
+    } catch {
+      // Ignore non-JSON payloads.
+    }
+
+    return null;
+  }
+
+  #extractImagePayload(value: unknown): {
+    imagePath?: string;
+    imageUrl?: string;
+    imageMimeType?: string;
+    imageWidth?: number;
+    imageHeight?: number;
+    imageBytes?: number;
+  } | null {
+    const objectPayload = this.#extractImagePayloadFromUnknown(value);
+    if (objectPayload) return objectPayload;
+
+    const stringValue = this.#toStringValue(value);
+    if (!stringValue) return null;
+    return this.#extractImagePayloadFromString(stringValue);
+  }
+
+  #extractImagePayloadFromMcpItem(item: Record<string, unknown>): {
+    imagePath?: string;
+    imageUrl?: string;
+    imageMimeType?: string;
+    imageWidth?: number;
+    imageHeight?: number;
+    imageBytes?: number;
+  } | null {
+    const resultPayload = this.#extractImagePayload(item.result);
+    if (resultPayload) return resultPayload;
+
+    const errorPayload = this.#extractImagePayload(item.error);
+    if (errorPayload) return errorPayload;
+
+    return this.#extractImagePayload(item);
+  }
+
+  #buildImageMessageFromPayload(
+    threadId: string,
+    itemId: string,
+    payload: {
+      imagePath?: string;
+      imageUrl?: string;
+      imageMimeType?: string;
+      imageWidth?: number;
+      imageHeight?: number;
+      imageBytes?: number;
+    },
+  ): Message {
+    const metadata: Message["metadata"] = {
+      ...(payload.imagePath ? { imagePath: payload.imagePath } : {}),
+      ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {}),
+      ...(payload.imageMimeType ? { imageMimeType: payload.imageMimeType } : {}),
+      ...(typeof payload.imageWidth === "number" ? { imageWidth: payload.imageWidth } : {}),
+      ...(typeof payload.imageHeight === "number" ? { imageHeight: payload.imageHeight } : {}),
+      ...(typeof payload.imageBytes === "number" ? { imageBytes: payload.imageBytes } : {}),
+    };
+
+    const source = payload.imagePath ?? payload.imageUrl ?? "unknown";
     return {
       id: itemId,
       role: "tool",
@@ -498,6 +756,26 @@ class MessagesStore {
       threadId,
       metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     };
+  }
+
+  #buildImageMessage(
+    threadId: string,
+    itemId: string,
+    item: Record<string, unknown>,
+  ): Message {
+    const payload = this.#extractImagePayloadFromUnknown(item) ?? {
+      imagePath: this.#toStringValue(item.path) ?? undefined,
+      imageUrl:
+        this.#toStringValue(item.imageUrl)
+        ?? this.#toStringValue(item.image_url)
+        ?? this.#toStringValue(item.url)
+        ?? undefined,
+      imageMimeType: this.#toStringValue(item.mimeType) ?? this.#toStringValue(item.mime_type) ?? undefined,
+      imageWidth: this.#toNumberValue(item.width) ?? undefined,
+      imageHeight: this.#toNumberValue(item.height) ?? undefined,
+      imageBytes: this.#toNumberValue(item.bytes) ?? undefined,
+    };
+    return this.#buildImageMessageFromPayload(threadId, itemId, payload);
   }
 
   handleMessage(msg: RpcMessage) {
@@ -835,6 +1113,12 @@ class MessagesStore {
           return;
         }
         case "mcpToolCall": {
+          const maybeImage = this.#extractImagePayloadFromMcpItem(item);
+          if (maybeImage) {
+            this.#upsert(threadId, this.#buildImageMessageFromPayload(threadId, itemId, maybeImage));
+            this.#clearStreaming(threadId, itemId);
+            return;
+          }
           const result = item.error ?? item.result ?? "";
           const text = `Tool: ${item.tool}\n${result ? JSON.stringify(result, null, 2) : ""}`;
           this.#upsert(threadId, { id: itemId, role: "tool", kind: "mcp", text, threadId });
@@ -958,13 +1242,20 @@ class MessagesStore {
           }
 
           case "mcpToolCall":
-            messages.push({
-              id,
-              role: "tool",
-              kind: "mcp",
-              text: `Tool: ${item.tool}\n${JSON.stringify(item.error ?? item.result ?? "", null, 2)}`,
-              threadId,
-            });
+            {
+              const maybeImage = this.#extractImagePayloadFromMcpItem(item);
+              if (maybeImage) {
+                messages.push(this.#buildImageMessageFromPayload(threadId, id, maybeImage));
+                break;
+              }
+              messages.push({
+                id,
+                role: "tool",
+                kind: "mcp",
+                text: `Tool: ${item.tool}\n${JSON.stringify(item.error ?? item.result ?? "", null, 2)}`,
+                threadId,
+              });
+            }
             break;
 
           case "webSearch":

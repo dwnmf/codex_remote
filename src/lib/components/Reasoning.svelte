@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { marked } from "marked";
+  import DOMPurify from "dompurify";
   import { untrack } from "svelte";
   import ShimmerText from "./ShimmerText.svelte";
 
@@ -40,6 +42,15 @@
   function toggle() {
     isOpen = !isOpen;
   }
+
+  const renderedHtml = $derived.by(() =>
+    DOMPurify.sanitize(
+      marked.parse(content, {
+        async: false,
+        breaks: true,
+      }) as string,
+    ),
+  );
 </script>
 
 <div class="reasoning">
@@ -78,7 +89,7 @@
 
   {#if isOpen}
     <div class="reasoning-content">
-      <p class="reasoning-text">{content}</p>
+      <div class="reasoning-text markdown-content">{@html renderedHtml}</div>
     </div>
   {/if}
 </div>
@@ -146,6 +157,52 @@
     white-space: pre-wrap;
     word-break: break-word;
     margin: 0;
+  }
+
+  .markdown-content {
+    white-space: normal;
+  }
+
+  .markdown-content :global(p),
+  .markdown-content :global(ul),
+  .markdown-content :global(ol),
+  .markdown-content :global(blockquote) {
+    margin: 0.22rem 0;
+  }
+
+  .markdown-content :global(:first-child) {
+    margin-top: 0;
+  }
+
+  .markdown-content :global(:last-child) {
+    margin-bottom: 0;
+  }
+
+  .markdown-content :global(ul),
+  .markdown-content :global(ol) {
+    padding-left: 1.25rem;
+  }
+
+  .markdown-content :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    padding: 0.05em 0.28em;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--cli-bg-elevated) 80%, transparent);
+  }
+
+  .markdown-content :global(pre) {
+    margin: 0.35rem 0;
+    padding: 0.35rem 0.45rem;
+    border: 1px solid color-mix(in srgb, var(--cli-border) 60%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--cli-bg-elevated) 85%, transparent);
+    overflow-x: auto;
+  }
+
+  .markdown-content :global(pre code) {
+    background: transparent;
+    padding: 0;
   }
 
   @keyframes slideIn {

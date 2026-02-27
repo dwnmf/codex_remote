@@ -144,11 +144,16 @@
 
 <form class="prompt-input" onsubmit={handleSubmit}>
   <div class="input-container stack">
+    <div class="composer-head split">
+      <span class="composer-kicker">Thread Composer</span>
+      <span class="composer-whisper">paste image • !command • /u task</span>
+    </div>
+
     <textarea
       bind:value={input}
       onkeydown={handleKeydown}
       onpaste={handlePaste}
-      placeholder="What would you like to do? (tip: image paste/attach, !<command>, or /u <task>)"
+      placeholder="Describe the next step for the agent."
       rows="1"
       {disabled}
     ></textarea>
@@ -382,6 +387,29 @@
     border-color: var(--cli-prefix-agent);
     box-shadow: var(--shadow-focus);
     transform: translate(-1px, -1px);
+  }
+
+  .composer-head {
+    --split-gap: var(--space-sm);
+    padding: 0.55rem var(--space-md) 0.4rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--cli-border) 70%, transparent);
+  }
+
+  .composer-kicker {
+    color: var(--cli-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
+
+  .composer-whisper {
+    color: var(--cli-text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
   }
 
   textarea {
@@ -674,6 +702,10 @@
   }
 
   @media (max-width: 480px) {
+    .composer-whisper {
+      display: none;
+    }
+
     .collapsible-label {
       display: none;
     }

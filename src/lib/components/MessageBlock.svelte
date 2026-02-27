@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { marked } from "marked";
+  import DOMPurify from "dompurify";
   import type { Message } from "../types";
   import ShimmerDot from "./ShimmerDot.svelte";
   import Reasoning from "./Reasoning.svelte";
@@ -40,6 +42,15 @@
     if (lines[lines.length - 1] === "") lines.pop();
     return lines;
   });
+
+  const renderedMarkdown = $derived.by(() =>
+    DOMPurify.sanitize(
+      marked.parse(message.text, {
+        async: false,
+        breaks: true,
+      }) as string,
+    ),
+  );
 </script>
 
 <div class="message-block {prefixConfig.bgClass}">
@@ -77,7 +88,7 @@
   {:else}
     <div class="message-line row">
       <span class="prefix" style:color={prefixConfig.color}>{prefixConfig.prefix}</span>
-      <span class="text">{message.text}</span>
+      <div class="text md-text">{@html renderedMarkdown}</div>
     </div>
   {/if}
 </div>
@@ -142,6 +153,52 @@
     color: var(--cli-text);
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  .md-text {
+    white-space: normal;
+  }
+
+  .md-text :global(p),
+  .md-text :global(ul),
+  .md-text :global(ol),
+  .md-text :global(blockquote) {
+    margin: 0.22rem 0;
+  }
+
+  .md-text :global(:first-child) {
+    margin-top: 0;
+  }
+
+  .md-text :global(:last-child) {
+    margin-bottom: 0;
+  }
+
+  .md-text :global(ul),
+  .md-text :global(ol) {
+    padding-left: 1.25rem;
+  }
+
+  .md-text :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    padding: 0.05em 0.28em;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--cli-bg-elevated) 80%, transparent);
+  }
+
+  .md-text :global(pre) {
+    margin: 0.35rem 0;
+    padding: 0.35rem 0.45rem;
+    border: 1px solid color-mix(in srgb, var(--cli-border) 60%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--cli-bg-elevated) 85%, transparent);
+    overflow-x: auto;
+  }
+
+  .md-text :global(pre code) {
+    background: transparent;
+    padding: 0;
   }
 
   .text.dim {
