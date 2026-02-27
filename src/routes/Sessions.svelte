@@ -88,7 +88,7 @@
     min-height: 100vh;
     background: var(--cli-bg);
     color: var(--cli-text);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     --stack-gap: 0;
   }
@@ -111,8 +111,9 @@
     margin: 0;
     font-size: clamp(4.1rem, 16vw, 11rem);
     line-height: 0.82;
-    letter-spacing: -0.05em;
-    font-weight: 600;
+    letter-spacing: -0.012em;
+    text-transform: uppercase;
+    font-weight: 500;
     color: var(--cli-text);
   }
 
@@ -154,8 +155,8 @@
     font-size: var(--text-xs);
     letter-spacing: 0.05em;
     text-transform: uppercase;
-    font-family: var(--font-mono);
-    font-weight: 600;
+    font-family: var(--font-display);
+    font-weight: 500;
   }
 
   .refresh-btn {
@@ -215,6 +216,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    letter-spacing: 0.008em;
   }
 
   .session-meta {

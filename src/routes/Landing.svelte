@@ -18,7 +18,10 @@
 <div class="landing stack">
   <div class="landing-frame stack">
     <header class="landing-header">
-      <div class="brand">codex-remote</div>
+      <div class="brand" aria-label="Codex Remote">
+        <span class="brand-main">CODEX</span>
+        <span class="brand-accent">Remote</span>
+      </div>
       <div class="header-actions">
         {#if pwa.canInstall && !pwa.isStandalone}
           <button class="ghost-btn" type="button" onclick={() => pwa.install()}>Install app</button>
@@ -38,7 +41,10 @@
 
     <main class="hero stack">
       <div class="hero-copy stack">
-        <h1>Remote</h1>
+        <h1>
+          <span class="hero-word">REMOTE</span>
+          <span class="hero-caption"><span class="hero-editorial">(Codex workflows)</span> from any browser</span>
+        </h1>
         <p>
           Codex Remote lets you start and supervise Codex CLI sessions running on your machine from any browser.
         </p>
@@ -64,14 +70,17 @@
 
     <section class="features">
       <div class="feature">
+        <span class="feature-index">01</span>
         <span class="feature-label">Anchor</span>
         <p>A lightweight daemon that spawns and manages Codex CLI sessions. Your code stays local.</p>
       </div>
       <div class="feature">
+        <span class="feature-index">02</span>
         <span class="feature-label">Orbit</span>
         <p>A Cloudflare relay that links your browser to Anchor over secure outbound tunnels.</p>
       </div>
       <div class="feature">
+        <span class="feature-index">03</span>
         <span class="feature-label">Handheld</span>
         <p>Approve writes, review diffs, and control long-running tasks from your phone.</p>
       </div>
@@ -79,7 +88,7 @@
   </div>
 
   <footer class="landing-footer">
-    <a class="footer-link" href="https://github.com/cospec-ai/codex-remote" target="_blank" rel="noopener">GitHub</a>
+    <a class="footer-link" href="https://github.com/dwnmf/codex_remote" target="_blank" rel="noopener">GitHub</a>
   </footer>
 </div>
 
@@ -117,12 +126,25 @@
   }
 
   .brand {
-    font-family: var(--font-display);
-    font-size: 1.08rem;
-    font-weight: 600;
-    letter-spacing: -0.03em;
-    text-transform: none;
     color: var(--cli-prefix-agent);
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.34rem;
+  }
+
+  .brand-main {
+    font-family: var(--font-display);
+    font-size: 1.22rem;
+    font-weight: 600;
+    letter-spacing: 0.025em;
+    line-height: 1;
+  }
+
+  .brand-accent {
+    font-family: var(--font-editorial);
+    font-size: 1rem;
+    font-style: italic;
+    color: var(--cli-text-dim);
   }
 
   .icon-btn {
@@ -158,10 +180,34 @@
 
   .hero h1 {
     margin: 0;
-    font-size: clamp(3.2rem, 13vw, 9.2rem);
-    line-height: 0.84;
-    letter-spacing: -0.06em;
+    display: grid;
+    gap: 0.1rem;
+    line-height: 0.82;
     text-wrap: balance;
+  }
+
+  .hero-word {
+    font-family: var(--font-display);
+    font-size: clamp(3.8rem, 15vw, 9rem);
+    text-transform: uppercase;
+    letter-spacing: -0.01em;
+    line-height: 0.84;
+    color: var(--cli-text);
+  }
+
+  .hero-caption {
+    font-family: var(--font-sans);
+    font-size: clamp(1.6rem, 4vw, 2.6rem);
+    line-height: 1.02;
+    letter-spacing: -0.012em;
+    color: var(--cli-text-dim);
+  }
+
+  .hero-editorial {
+    font-family: var(--font-editorial);
+    font-style: italic;
+    font-weight: 400;
+    color: var(--cli-text);
   }
 
   .hero p {
@@ -170,6 +216,7 @@
     max-width: 620px;
     line-height: 1.5;
     font-size: var(--text-base);
+    font-family: var(--font-sans);
   }
 
   .hero-actions {
@@ -225,8 +272,8 @@
   .features {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-sm);
-    padding: 0.5rem;
+    gap: var(--space-md);
+    padding: var(--space-md);
   }
 
   .feature {
@@ -234,26 +281,37 @@
     flex-direction: column;
     gap: var(--space-xs);
     min-height: 7.5rem;
-    padding: 0.62rem;
-    border: 1px solid var(--cli-border);
-    border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--cli-bg) 72%, transparent);
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
     box-shadow: none;
   }
 
   .feature-label {
-    font-size: var(--text-xs);
+    font-family: var(--font-display);
+    font-size: 1.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+    color: var(--cli-text);
+    font-weight: 500;
+  }
+
+  .feature-index {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--cli-prefix-agent);
-    font-weight: 800;
   }
 
   .feature p {
     margin: 0;
-    font-size: var(--text-sm);
     color: var(--cli-text-dim);
     line-height: 1.5;
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    letter-spacing: 0.004em;
   }
 
   /* Footer */

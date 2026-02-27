@@ -68,7 +68,10 @@
 
 <header class="app-header">
     <div class="app-header-inner row">
-        <a href="/app" class="brand">codex-remote</a>
+        <a href="/app" class="brand" aria-label="Codex Remote">
+            <span class="brand-main">CODEX</span>
+            <span class="brand-accent">Remote</span>
+        </a>
         <span class="separator">·</span>
         <button
             type="button"
@@ -196,14 +199,29 @@
     }
 
     .brand {
-        font-family: var(--font-display);
-        font-size: 1.08rem;
-        font-weight: 600;
-        letter-spacing: -0.02em;
-        text-transform: none;
+        display: inline-flex;
+        align-items: baseline;
+        gap: 0.3rem;
         color: var(--cli-prefix-agent);
         text-decoration: none;
         transition: opacity var(--transition-fast);
+    }
+
+    .brand-main {
+        font-family: var(--font-display);
+        font-size: 1.22rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        line-height: 1;
+    }
+
+    .brand-accent {
+        font-family: var(--font-editorial);
+        font-size: 1.04rem;
+        font-weight: 400;
+        letter-spacing: 0.01em;
+        font-style: italic;
+        color: var(--cli-text-dim);
     }
 
     .brand:hover {

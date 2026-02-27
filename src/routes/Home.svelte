@@ -455,6 +455,17 @@
   <main class="hero">
     <div class="hero-content">
       <section class="workspace stack">
+        <section class="workspace-masthead">
+          <span class="workspace-kicker">Homepage</span>
+          <h1 class="workspace-title">
+            <span class="workspace-title-main">CODEX</span>
+            <span class="workspace-title-sub"><span class="workspace-title-editorial">(remote)</span> control center</span>
+          </h1>
+          <p class="workspace-summary">
+            Run parallel coding windows, switch projects, and keep approvals in one place.
+          </p>
+        </section>
+
         <section class="pane-toolbar split">
           <div class="pane-count row">
             <span>Input windows</span>
@@ -645,6 +656,61 @@
     padding: 0;
     background: transparent;
     box-shadow: none;
+  }
+
+  .workspace-masthead {
+    display: grid;
+    gap: 0.24rem;
+    padding: 0.12rem 0 0.24rem;
+  }
+
+  .workspace-kicker {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--cli-text-muted);
+    line-height: 1.2;
+  }
+
+  .workspace-title {
+    margin: 0;
+    display: grid;
+    gap: 0.16rem;
+  }
+
+  .workspace-title-main {
+    font-family: var(--font-display);
+    font-size: clamp(3.2rem, 12vw, 8.6rem);
+    text-transform: uppercase;
+    line-height: 0.82;
+    letter-spacing: -0.012em;
+    color: var(--cli-text);
+  }
+
+  .workspace-title-sub {
+    font-family: var(--font-sans);
+    font-size: clamp(1.2rem, 3vw, 2.2rem);
+    line-height: 1;
+    letter-spacing: -0.015em;
+    color: var(--cli-text-dim);
+  }
+
+  .workspace-title-editorial {
+    font-family: var(--font-editorial);
+    font-style: italic;
+    font-weight: 400;
+    color: var(--cli-text);
+  }
+
+  .workspace-summary {
+    margin: 0;
+    max-width: 58ch;
+    color: var(--cli-text-dim);
+    font-family: var(--font-editorial);
+    font-size: 1.02rem;
+    line-height: 1.45;
+    letter-spacing: 0.008em;
   }
 
   .pane-toolbar {

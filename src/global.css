@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Sora:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Oswald:wght@400;500;600;700&display=swap");
 @import "./lib/styles/tokens.css";
 @import "./lib/styles/layout.css";
 
@@ -17,8 +17,9 @@ body {
   transition:
     background var(--transition-fast),
     color var(--transition-fast);
-  letter-spacing: 0.002em;
+  letter-spacing: 0.004em;
   text-rendering: geometricPrecision;
+  font-feature-settings: "liga" 1, "kern" 1, "calt" 1;
 }
 
 #app {
@@ -32,9 +33,26 @@ h4,
 h5,
 h6 {
   font-family: var(--font-display);
-  letter-spacing: -0.03em;
-  line-height: 0.96;
-  font-weight: 600;
+  letter-spacing: -0.022em;
+  line-height: 0.9;
+  font-weight: 500;
+}
+
+p,
+li {
+  font-family: var(--font-sans);
+  letter-spacing: 0.006em;
+}
+
+.editorial {
+  font-family: var(--font-editorial);
+  font-variation-settings: "opsz" 96;
+}
+
+.micro-label {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
 }
 
 body::before {
@@ -42,22 +60,8 @@ body::before {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  opacity: 0.38;
-  background:
-    repeating-linear-gradient(
-      0deg,
-      transparent 0,
-      transparent 45px,
-      color-mix(in srgb, var(--cli-border) 34%, transparent) 45px,
-      color-mix(in srgb, var(--cli-border) 34%, transparent) 46px
-    ),
-    repeating-linear-gradient(
-      90deg,
-      transparent 0,
-      transparent 45px,
-      color-mix(in srgb, var(--cli-border) 18%, transparent) 45px,
-      color-mix(in srgb, var(--cli-border) 18%, transparent) 46px
-    );
+  opacity: 1;
+  background: var(--cli-bg);
   z-index: 0;
 }
 

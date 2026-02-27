@@ -159,16 +159,18 @@
   h1 {
     margin: 0;
     font-size: clamp(2.4rem, 5vw, 3.8rem);
-    line-height: 0.88;
-    letter-spacing: -0.05em;
+    line-height: 0.9;
+    letter-spacing: -0.018em;
+    text-transform: uppercase;
   }
 
   .subtitle {
     margin: 0;
     color: var(--cli-text-dim);
-    font-size: var(--text-base);
+    font-size: 1.04rem;
     line-height: 1.5;
     max-width: 32ch;
+    font-family: var(--font-editorial);
   }
 
   .method-toggle {
@@ -200,10 +202,10 @@
     border: 1px solid var(--cli-border);
     background: var(--cli-bg);
     color: var(--cli-text);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    letter-spacing: 0.008em;
+    text-transform: none;
     outline: none;
   }
 

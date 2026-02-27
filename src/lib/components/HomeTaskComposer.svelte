@@ -191,12 +191,12 @@
     border: none;
     color: var(--cli-text);
     font-family: var(--font-sans);
-    font-size: 1.82rem;
-    font-weight: 500;
+    font-size: clamp(1.46rem, 3.5vw, 2.05rem);
+    font-weight: 700;
     line-height: 1.5;
     resize: vertical;
     min-height: 6.2rem;
-    letter-spacing: -0.015em;
+    letter-spacing: -0.022em;
   }
 
   .input-card textarea:focus {
@@ -205,6 +205,10 @@
 
   .input-card textarea::placeholder {
     color: var(--cli-text-muted);
+    font-family: var(--font-editorial);
+    font-style: italic;
+    font-weight: 400;
+    letter-spacing: 0.003em;
   }
 
   .input-card textarea:disabled {
@@ -228,12 +232,12 @@
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--radius-md);
-    color: var(--cli-text-muted);
-    font-family: var(--font-mono);
+    color: var(--cli-text-dim);
+    font-family: var(--font-display);
     font-size: var(--text-xs);
-    font-weight: 600;
+    font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.045em;
     cursor: pointer;
     transition: all var(--transition-fast);
   }
@@ -301,12 +305,12 @@
     border: 0;
     border-radius: var(--radius-md);
     background: transparent;
-    color: var(--cli-text-muted);
+    color: var(--cli-text-dim);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
-    font-weight: 600;
+    font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.04em;
     cursor: pointer;
     transition: all var(--transition-fast);
     border-bottom: 1px solid color-mix(in srgb, var(--cli-border) 55%, transparent);
@@ -362,8 +366,10 @@
     border: none;
     border-radius: var(--radius-md);
     color: var(--cli-text);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.01em;
     text-align: left;
     cursor: pointer;
     transition: background var(--transition-fast);

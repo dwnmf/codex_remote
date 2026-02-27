@@ -12,7 +12,10 @@
     <div class="login-left">
       <div class="login-form-wrapper">
         <header class="login-header">
-          <a class="brand" href="/">codex-remote</a>
+          <a class="brand" href="/" aria-label="Codex Remote">
+            <span class="brand-main">CODEX</span>
+            <span class="brand-accent">Remote</span>
+          </a>
           <button type="button" class="icon-btn" onclick={() => theme.cycle()} title="Theme: {theme.current}">
             <span class="icon-glyph">{themeIcons[theme.current]}</span>
           </button>
@@ -23,14 +26,16 @@
         </div>
 
         <footer class="login-footer">
-          <a class="footer-link" href="https://github.com/cospec-ai/codex-remote" target="_blank" rel="noopener">GitHub</a>
+          <a class="footer-link" href="https://github.com/dwnmf/codex_remote" target="_blank" rel="noopener">GitHub</a>
         </footer>
       </div>
     </div>
 
     <div class="login-right">
       <div class="login-visual">
-        <span class="visual-watermark">Access</span>
+        <div class="visual-head">
+          <span class="visual-watermark">Access</span>
+        </div>
         <div class="visual-text">
           <span class="visual-label">Remote control for your local Codex.</span>
           <span class="visual-desc">Start and supervise Codex CLI sessions from any device.</span>
@@ -84,13 +89,26 @@
   }
 
   .brand {
-    font-family: var(--font-display);
-    font-size: 1.08rem;
-    font-weight: 600;
-    letter-spacing: -0.03em;
-    text-transform: none;
     color: var(--cli-prefix-agent);
     text-decoration: none;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.34rem;
+  }
+
+  .brand-main {
+    font-family: var(--font-display);
+    font-size: 1.22rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1;
+  }
+
+  .brand-accent {
+    font-family: var(--font-editorial);
+    font-size: 1rem;
+    font-style: italic;
+    color: var(--cli-text-dim);
   }
 
   .icon-btn {
@@ -150,50 +168,32 @@
   .login-visual {
     flex: 1;
     display: flex;
-    align-items: flex-end;
+    flex-direction: column;
+    align-items: flex-start;
     justify-content: flex-start;
     padding: var(--space-xl);
-    background: color-mix(in srgb, var(--cli-bg) 70%, transparent);
+    background: color-mix(in srgb, var(--cli-bg) 76%, transparent);
     border-left: 1px solid var(--cli-border);
     position: relative;
     overflow: hidden;
   }
 
-  .login-visual::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background:
-      repeating-linear-gradient(
-        0deg,
-        transparent,
-        transparent 45px,
-        color-mix(in srgb, var(--cli-border) 35%, transparent) 45px,
-        color-mix(in srgb, var(--cli-border) 35%, transparent) 46px
-      ),
-      repeating-linear-gradient(
-        90deg,
-        transparent,
-        transparent 45px,
-        color-mix(in srgb, var(--cli-border) 20%, transparent) 45px,
-        color-mix(in srgb, var(--cli-border) 20%, transparent) 46px
-      );
-    opacity: 0.9;
+  .visual-head {
+    display: grid;
+    gap: 0.8rem;
+    max-width: 30rem;
   }
 
   .visual-watermark {
-    position: absolute;
-    top: clamp(1.2rem, 6vw, 4rem);
-    left: clamp(1rem, 4vw, 3rem);
+    position: relative;
     font-family: var(--font-display);
-    font-size: clamp(2.8rem, 10vw, 8.2rem);
+    font-size: clamp(3.6rem, 10vw, 7rem);
     line-height: 0.84;
-    letter-spacing: -0.06em;
+    letter-spacing: -0.008em;
+    text-transform: uppercase;
     color: color-mix(in srgb, var(--cli-text) 88%, transparent);
     pointer-events: none;
     white-space: nowrap;
-    max-width: calc(100% - 2rem);
-    overflow: hidden;
   }
 
   .visual-text {
@@ -202,19 +202,25 @@
     flex-direction: column;
     gap: var(--space-sm);
     max-width: 420px;
+    margin-top: auto;
+    margin-bottom: clamp(0.7rem, 2vh, 1.5rem);
+    padding-top: clamp(0.6rem, 1.2vh, 1rem);
   }
 
   .visual-label {
-    font-size: clamp(1.25rem, 2vw, 1.75rem);
-    font-family: var(--font-display);
-    font-weight: 600;
-    line-height: 1.15;
-    letter-spacing: -0.03em;
+    font-size: clamp(1.35rem, 2.1vw, 1.9rem);
+    font-family: var(--font-editorial);
+    font-weight: 400;
+    font-style: italic;
+    line-height: 1.08;
+    letter-spacing: -0.004em;
+    max-width: 18ch;
   }
 
   .visual-desc {
-    font-size: var(--text-sm);
+    font-size: 1rem;
     color: var(--cli-text-dim);
-    line-height: 1.5;
+    line-height: 1.4;
+    max-width: 34ch;
   }
 </style>
