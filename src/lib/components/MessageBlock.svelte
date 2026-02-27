@@ -2,6 +2,7 @@
   import { marked } from "marked";
   import DOMPurify from "dompurify";
   import type { Message } from "../types";
+  import { MAX_MARKDOWN_RENDER_CHARS } from "../message-limits";
   import ShimmerDot from "./ShimmerDot.svelte";
   import Reasoning from "./Reasoning.svelte";
   import Tool from "./Tool.svelte";
@@ -22,6 +23,7 @@
   const isTerminal = $derived(message.role === "tool" && message.kind === "terminal");
   const isWait = $derived(message.role === "tool" && message.kind === "wait");
   const isCompaction = $derived(message.role === "tool" && message.kind === "compaction");
+  const renderPlainText = $derived(message.text.length > MAX_MARKDOWN_RENDER_CHARS);
 
   const prefixConfig = $derived.by(() => {
     if (message.role === "user") {
@@ -43,14 +45,15 @@
     return lines;
   });
 
-  const renderedMarkdown = $derived.by(() =>
-    DOMPurify.sanitize(
+  const renderedMarkdown = $derived.by(() => {
+    if (renderPlainText) return "";
+    return DOMPurify.sanitize(
       marked.parse(message.text, {
         async: false,
         breaks: true,
       }) as string,
-    ),
-  );
+    );
+  });
 </script>
 
 <div class="message-block {prefixConfig.bgClass}">
@@ -88,7 +91,11 @@
   {:else}
     <div class="message-line row">
       <span class="prefix" style:color={prefixConfig.color}>{prefixConfig.prefix}</span>
-      <div class="text md-text">{@html renderedMarkdown}</div>
+      {#if renderPlainText}
+        <div class="text">{message.text}</div>
+      {:else}
+        <div class="text md-text">{@html renderedMarkdown}</div>
+      {/if}
     </div>
   {/if}
 </div>

@@ -1,6 +1,7 @@
 import type { Message, RpcMessage, ApprovalRequest, UserInputRequest, UserInputQuestion, TurnStatus, PlanStep, CollaborationMode } from "./types";
 import { socket } from "./socket.svelte";
 import { threads } from "./threads.svelte";
+import { appendDeltaWithCap, keepRecentMessages } from "./message-limits";
 
 const STORE_KEY = "__codex_remote_messages_store__";
 
@@ -310,12 +311,12 @@ class MessagesStore {
   #appendToMessage(threadId: string, itemId: string, delta: string, role: Message["role"], kind?: Message["kind"]) {
     const key = `${threadId}:${itemId}`;
     const current = this.#streamingText.get(key) ?? "";
-    this.#streamingText.set(key, current + delta);
+    const nextText = appendDeltaWithCap(current, delta);
+    this.#streamingText.set(key, nextText);
     this.#streamingText = new Map(this.#streamingText);
 
     const messages = this.#byThread.get(threadId) ?? [];
     const idx = messages.findIndex((m) => m.id === itemId);
-    const nextText = this.#streamingText.get(key) ?? "";
 
     if (idx >= 0) {
       const updated = [...messages];
@@ -1343,7 +1344,8 @@ class MessagesStore {
       }
     }
 
-    this.#byThread.set(threadId, messages);
+    const bounded = keepRecentMessages(messages);
+    this.#byThread.set(threadId, bounded);
     this.#byThread = new Map(this.#byThread);
   }
 }
