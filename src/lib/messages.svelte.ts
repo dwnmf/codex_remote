@@ -38,39 +38,52 @@ class MessagesStore {
   #statusDetailByThread = $state<Map<string, string | null>>(new Map());
 
   get turnStatus() {
-    const threadId = threads.currentId;
-    if (!threadId) return null;
-    return this.#turnStatusByThread.get(threadId) ?? null;
+    return this.getThreadTurnStatus(threads.currentId);
   }
   get plan() {
-    const threadId = threads.currentId;
-    if (!threadId) return [];
-    return this.#planByThread.get(threadId) ?? [];
+    return this.getThreadPlan(threads.currentId);
   }
   get planExplanation() {
-    const threadId = threads.currentId;
-    if (!threadId) return null;
-    return this.#planExplanationByThread.get(threadId) ?? null;
+    return this.getThreadPlanExplanation(threads.currentId);
   }
   get statusDetail() {
-    const threadId = threads.currentId;
-    if (!threadId) return null;
-    return this.#statusDetailByThread.get(threadId) ?? null;
+    return this.getThreadStatusDetail(threads.currentId);
   }
   get isReasoningStreaming() {
-    const threadId = threads.currentId;
-    if (!threadId) return false;
-    return this.#isReasoningStreamingByThread.get(threadId) ?? false;
+    return this.getThreadIsReasoningStreaming(threads.currentId);
   }
   get streamingReasoningText() {
-    const threadId = threads.currentId;
-    if (!threadId) return "";
-    return this.#streamingReasoningTextByThread.get(threadId) ?? "";
+    return this.getThreadStreamingReasoningText(threads.currentId);
   }
 
   getThreadTurnStatus(threadId: string | null): TurnStatus | null {
     if (!threadId) return null;
     return this.#turnStatusByThread.get(threadId) ?? null;
+  }
+
+  getThreadPlan(threadId: string | null): PlanStep[] {
+    if (!threadId) return [];
+    return this.#planByThread.get(threadId) ?? [];
+  }
+
+  getThreadPlanExplanation(threadId: string | null): string | null {
+    if (!threadId) return null;
+    return this.#planExplanationByThread.get(threadId) ?? null;
+  }
+
+  getThreadStatusDetail(threadId: string | null): string | null {
+    if (!threadId) return null;
+    return this.#statusDetailByThread.get(threadId) ?? null;
+  }
+
+  getThreadIsReasoningStreaming(threadId: string | null): boolean {
+    if (!threadId) return false;
+    return this.#isReasoningStreamingByThread.get(threadId) ?? false;
+  }
+
+  getThreadStreamingReasoningText(threadId: string | null): string {
+    if (!threadId) return "";
+    return this.#streamingReasoningTextByThread.get(threadId) ?? "";
   }
 
   interrupt(threadId: string): { success: boolean; error?: string } {
@@ -133,13 +146,13 @@ class MessagesStore {
     return null;
   }
 
-  approve(approvalId: string, forSession = false, collaborationMode?: CollaborationMode) {
+  approve(approvalId: string, forSession = false, collaborationMode?: CollaborationMode, threadId?: string) {
     const approval = this.#pendingApprovals.get(approvalId);
     if (!approval || approval.status !== "pending") return;
 
     approval.status = "approved";
     this.#pendingApprovals = new Map(this.#pendingApprovals);
-    this.#updateApprovalInMessages(approvalId, "approved");
+    this.#updateApprovalInMessages(approvalId, "approved", threadId);
 
     // Send JSON-RPC response with decision enum per Codex protocol (lowercase!)
     const decision = forSession ? "acceptForSession" : "accept";
@@ -149,13 +162,13 @@ class MessagesStore {
     });
   }
 
-  decline(approvalId: string, collaborationMode?: CollaborationMode) {
+  decline(approvalId: string, collaborationMode?: CollaborationMode, threadId?: string) {
     const approval = this.#pendingApprovals.get(approvalId);
     if (!approval || approval.status !== "pending") return;
 
     approval.status = "declined";
     this.#pendingApprovals = new Map(this.#pendingApprovals);
-    this.#updateApprovalInMessages(approvalId, "declined");
+    this.#updateApprovalInMessages(approvalId, "declined", threadId);
 
     // Decline = deny but let agent continue
     socket.send({
@@ -164,13 +177,13 @@ class MessagesStore {
     });
   }
 
-  cancel(approvalId: string) {
+  cancel(approvalId: string, threadId?: string) {
     const approval = this.#pendingApprovals.get(approvalId);
     if (!approval || approval.status !== "pending") return;
 
     approval.status = "cancelled";
     this.#pendingApprovals = new Map(this.#pendingApprovals);
-    this.#updateApprovalInMessages(approvalId, "cancelled");
+    this.#updateApprovalInMessages(approvalId, "cancelled", threadId);
 
     // Cancel = deny and interrupt turn
     socket.send({
@@ -179,13 +192,18 @@ class MessagesStore {
     });
   }
 
-  respondToUserInput(messageId: string, answers: Record<string, string[]>, collaborationMode?: CollaborationMode) {
+  respondToUserInput(
+    messageId: string,
+    answers: Record<string, string[]>,
+    collaborationMode?: CollaborationMode,
+    threadId?: string,
+  ) {
     this.#pendingLiveMessages.delete(messageId);
 
-    const threadId = threads.currentId;
-    if (!threadId) return;
+    const targetThreadId = threadId ?? threads.currentId ?? this.#findThreadIdByMessageId(messageId);
+    if (!targetThreadId) return;
 
-    const msgs = this.#byThread.get(threadId) ?? [];
+    const msgs = this.#byThread.get(targetThreadId) ?? [];
     const idx = msgs.findIndex((m) => m.id === messageId);
     if (idx < 0) return;
     const msg = msgs[idx];
@@ -206,38 +224,56 @@ class MessagesStore {
       ...msgs[idx],
       userInputRequest: { ...msgs[idx].userInputRequest!, status: "answered" },
     };
-    this.#byThread = new Map(this.#byThread).set(threadId, updated);
+    this.#byThread = new Map(this.#byThread).set(targetThreadId, updated);
   }
 
-  approvePlan(messageId: string) {
-    const threadId = threads.currentId;
-    if (!threadId) return;
+  approvePlan(messageId: string, threadId?: string) {
+    const targetThreadId = threadId ?? threads.currentId ?? this.#findThreadIdByMessageId(messageId);
+    if (!targetThreadId) return;
 
-    const msgs = this.#byThread.get(threadId) ?? [];
+    const msgs = this.#byThread.get(targetThreadId) ?? [];
     const idx = msgs.findIndex((m) => m.id === messageId);
     if (idx < 0) return;
 
     const updated = [...msgs];
     updated[idx] = { ...msgs[idx], planStatus: "approved" };
-    this.#byThread = new Map(this.#byThread).set(threadId, updated);
+    this.#byThread = new Map(this.#byThread).set(targetThreadId, updated);
   }
 
-  #updateApprovalInMessages(approvalId: string, status: "approved" | "declined" | "cancelled") {
+  #updateApprovalInMessages(
+    approvalId: string,
+    status: "approved" | "declined" | "cancelled",
+    threadId?: string,
+  ) {
     this.#pendingLiveMessages.delete(`approval-${approvalId}`);
 
-    const threadId = threads.currentId;
-    if (!threadId) return;
+    const targetThreadId = threadId ?? threads.currentId ?? this.#findThreadIdByApprovalId(approvalId);
+    if (!targetThreadId) return;
 
-    const messages = this.#byThread.get(threadId) ?? [];
-    const idx = messages.findIndex((m) => m.approval?.id === approvalId);
+    const threadMessages = this.#byThread.get(targetThreadId) ?? [];
+    const idx = threadMessages.findIndex((m) => m.approval?.id === approvalId);
     if (idx >= 0) {
-      const updated = [...messages];
+      const updated = [...threadMessages];
       updated[idx] = {
-        ...messages[idx],
-        approval: { ...messages[idx].approval!, status },
+        ...threadMessages[idx],
+        approval: { ...threadMessages[idx].approval!, status },
       };
-      this.#byThread = new Map(this.#byThread).set(threadId, updated);
+      this.#byThread = new Map(this.#byThread).set(targetThreadId, updated);
     }
+  }
+
+  #findThreadIdByMessageId(messageId: string): string | null {
+    for (const [threadId, threadMessages] of this.#byThread) {
+      if (threadMessages.some((m) => m.id === messageId)) return threadId;
+    }
+    return null;
+  }
+
+  #findThreadIdByApprovalId(approvalId: string): string | null {
+    for (const [threadId, threadMessages] of this.#byThread) {
+      if (threadMessages.some((m) => m.approval?.id === approvalId)) return threadId;
+    }
+    return null;
   }
 
   #add(threadId: string, message: Message) {

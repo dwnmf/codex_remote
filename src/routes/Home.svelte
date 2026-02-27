@@ -18,11 +18,14 @@
   import WorktreeModal from "../lib/components/WorktreeModal.svelte";
   import RecentSessionsList from "../lib/components/RecentSessionsList.svelte";
   import MessageBlock from "../lib/components/MessageBlock.svelte";
+  import ApprovalPrompt from "../lib/components/ApprovalPrompt.svelte";
+  import UserInputPrompt from "../lib/components/UserInputPrompt.svelte";
+  import PlanCard from "../lib/components/PlanCard.svelte";
   import type { ModeKind } from "../lib/types";
 
   const themeIcons = { system: "◐", light: "○", dark: "●" } as const;
   const RECENT_LIMIT = 5;
-  const PANE_COUNT_OPTIONS = [2, 4, 8] as const;
+  const PANE_COUNT_OPTIONS = [1, 2, 4, 8] as const;
   const MAX_PANES = 8;
 
   type PaneCount = (typeof PANE_COUNT_OPTIONS)[number];
@@ -30,6 +33,7 @@
   interface ComposerPane {
     id: number;
     task: string;
+    terminalInput: string;
     project: string;
     threadId: string | null;
     mode: ModeKind;
@@ -43,7 +47,7 @@
   const hasMoreThreads = $derived(threads.list.length > RECENT_LIMIT);
   const isConnected = $derived(socket.status === "connected");
 
-  let paneCount = $state<PaneCount>(2);
+  let paneCount = $state<PaneCount>(1);
   let panes = $state<ComposerPane[]>(createInitialPanes());
   let worktreeModalOpen = $state(false);
   let activePaneId = $state<number | null>(null);
@@ -61,6 +65,7 @@
       list.push({
         id: index + 1,
         task: "",
+        terminalInput: "",
         project: "",
         threadId: null,
         mode: "code",
@@ -105,6 +110,20 @@
     return messages.getThreadMessages(pane.threadId).slice(-40);
   }
 
+  function resolvePaneCollaborationMode(pane: ComposerPane) {
+    const effectiveModel = pane.selectedModel.trim() || models.defaultModel?.value?.trim() || "";
+    if (!effectiveModel) return undefined;
+    return threads.resolveCollaborationMode(pane.mode, effectiveModel, "medium");
+  }
+
+  function lastPlanIdForPane(pane: ComposerPane): string | null {
+    const paneMsgs = paneMessages(pane);
+    for (let i = paneMsgs.length - 1; i >= 0; i -= 1) {
+      if (paneMsgs[i].kind === "plan") return paneMsgs[i].id;
+    }
+    return null;
+  }
+
   function sendTurnFromPane(paneId: number, targetThreadId: string, inputText: string): string | null {
     const pane = getPane(paneId);
     if (!pane) return "Pane not found";
@@ -127,7 +146,7 @@
     const effectiveModel = pane.selectedModel.trim() || models.defaultModel?.value?.trim() || "";
     if (effectiveModel) {
       params.model = effectiveModel;
-      params.collaborationMode = threads.resolveCollaborationMode(pane.mode, effectiveModel, "medium");
+      params.collaborationMode = resolvePaneCollaborationMode(pane);
     }
     params.effort = "medium";
 
@@ -138,6 +157,72 @@
     });
 
     return result.success ? null : result.error ?? "Failed to send message";
+  }
+
+  function handlePanePlanApprove(paneId: number, messageId: string) {
+    const pane = getPane(paneId);
+    if (!pane?.threadId) return;
+    messages.approvePlan(messageId, pane.threadId);
+    updatePane(paneId, { mode: "code" });
+    const error = sendTurnFromPane(paneId, pane.threadId, "Approved. Proceed with implementation.");
+    if (error) {
+      updatePane(paneId, { submitError: error });
+    }
+  }
+
+  function submitToExistingThread(paneId: number, rawInput: string): string | null {
+    const pane = getPane(paneId);
+    if (!pane?.threadId) return "Session is not started for this window.";
+
+    const normalizedInput = rawInput.trim();
+    if (!normalizedInput) return "Input is empty";
+
+    const ulwCommand = parseUlwCommand(normalizedInput);
+    const loopDeps = {
+      sendTurn: (threadId: string, inputText: string) =>
+        sendTurnFromPane(paneId, threadId, inputText) === null,
+      onTurnComplete: messages.onTurnComplete.bind(messages),
+    };
+
+    if (ulwCommand?.kind === "stop") {
+      handleStopPane(paneId);
+      return null;
+    }
+
+    if (ulwCommand?.kind === "config") {
+      if (
+        typeof ulwCommand.maxIterations !== "number" &&
+        !ulwCommand.completionPromise
+      ) {
+        return "Usage: /u config max=30 promise=DONE";
+      }
+      ulwRuntime.configure(pane.threadId, {
+        maxIterations: ulwCommand.maxIterations,
+        completionPromise: ulwCommand.completionPromise,
+      });
+      return null;
+    }
+
+    if (ulwCommand?.kind === "start") {
+      const task =
+        ulwCommand.task ?? pickUlwTaskFromMessages(messages.getThreadMessages(pane.threadId));
+      if (!task) return "Add task after /u for this window.";
+      ulwLoopRunner.start(
+        pane.threadId,
+        {
+          task,
+          maxIterations: ulwCommand.maxIterations,
+          completionPromise: ulwCommand.completionPromise,
+        },
+        loopDeps,
+      );
+      return null;
+    }
+
+    if (ulwRuntime.isActive(pane.threadId)) {
+      ulwLoopRunner.stop(pane.threadId, "manual_user_input");
+    }
+    return sendTurnFromPane(paneId, pane.threadId, normalizedInput);
   }
 
   function handleStopPane(paneId: number) {
@@ -188,6 +273,10 @@
     updatePane(paneId, { task: value });
   }
 
+  function handleTerminalInputChange(paneId: number, value: string) {
+    updatePane(paneId, { terminalInput: value });
+  }
+
   function handleSelectModel(paneId: number, value: string) {
     updatePane(paneId, { selectedModel: value });
   }
@@ -201,6 +290,23 @@
   function handleOpenWorktrees(paneId: number) {
     activePaneId = paneId;
     worktreeModalOpen = true;
+  }
+
+  function canSendTerminalInput(pane: ComposerPane): boolean {
+    if (!pane.threadId) return false;
+    if (!isConnected) return false;
+    if (pane.terminalInput.trim().length === 0) return false;
+    return !paneIsRunning(pane);
+  }
+
+  function handleTerminalInputSubmit(paneId: number) {
+    const pane = getPane(paneId);
+    if (!pane?.threadId || !canSendTerminalInput(pane)) return;
+    const error = submitToExistingThread(paneId, pane.terminalInput);
+    updatePane(paneId, {
+      terminalInput: error ? pane.terminalInput : "",
+      submitError: error,
+    });
   }
 
   async function handleProjectConfirm(value: string) {
@@ -224,60 +330,9 @@
     if (!pane || !canSubmit(pane)) return;
 
     const rawInput = pane.task.trim();
-    const ulwCommand = parseUlwCommand(rawInput);
-    const loopDeps = {
-      sendTurn: (threadId: string, inputText: string) =>
-        sendTurnFromPane(paneId, threadId, inputText) === null,
-      onTurnComplete: messages.onTurnComplete.bind(messages),
-    };
 
     if (pane.threadId) {
-      if (ulwCommand?.kind === "stop") {
-        handleStopPane(paneId);
-        updatePane(paneId, { task: "", submitError: null });
-        return;
-      }
-
-      if (ulwCommand?.kind === "config") {
-        if (
-          typeof ulwCommand.maxIterations !== "number" &&
-          !ulwCommand.completionPromise
-        ) {
-          updatePane(paneId, { submitError: "Usage: /u config max=30 promise=DONE" });
-          return;
-        }
-        ulwRuntime.configure(pane.threadId, {
-          maxIterations: ulwCommand.maxIterations,
-          completionPromise: ulwCommand.completionPromise,
-        });
-        updatePane(paneId, { task: "", submitError: null });
-        return;
-      }
-
-      if (ulwCommand?.kind === "start") {
-        const task =
-          ulwCommand.task ?? pickUlwTaskFromMessages(messages.getThreadMessages(pane.threadId));
-        if (!task) {
-          updatePane(paneId, { submitError: "Add task after /u for this window." });
-          return;
-        }
-        ulwLoopRunner.start(
-          pane.threadId,
-          {
-            task,
-            maxIterations: ulwCommand.maxIterations,
-            completionPromise: ulwCommand.completionPromise,
-          },
-          loopDeps,
-        );
-        updatePane(paneId, { task: "", submitError: null });
-        return;
-      }
-
-      if (ulwRuntime.isActive(pane.threadId)) {
-        ulwLoopRunner.stop(pane.threadId, "manual_user_input");
-      }
-      const error = sendTurnFromPane(paneId, pane.threadId, rawInput);
+      const error = submitToExistingThread(paneId, rawInput);
       updatePane(paneId, {
         task: error ? pane.task : "",
         submitError: error,
@@ -286,6 +341,7 @@
     }
 
     if (pane.pendingStartToken !== null) return;
+    const ulwCommand = parseUlwCommand(rawInput);
     if (ulwCommand?.kind === "stop") {
       updatePane(paneId, { submitError: "Use /u stop inside an active window terminal." });
       return;
@@ -320,6 +376,11 @@
               updatePane(paneId, { submitError: "Add task after /u when launching from Home." });
               return;
             }
+            const loopDeps = {
+              sendTurn: (threadId: string, inputText: string) =>
+                sendTurnFromPane(paneId, threadId, inputText) === null,
+              onTurnComplete: messages.onTurnComplete.bind(messages),
+            };
             ulwLoopRunner.start(
               threadId,
               {
@@ -465,10 +526,66 @@
                       <div class="pane-terminal-empty">Waiting for output...</div>
                     {:else}
                       {#each paneMessages(pane) as message (message.id)}
-                        <MessageBlock {message} />
+                        {#if message.role === "approval" && message.approval}
+                          <ApprovalPrompt
+                            approval={message.approval}
+                            onApprove={(forSession) =>
+                              messages.approve(
+                                message.approval!.id,
+                                forSession,
+                                resolvePaneCollaborationMode(pane),
+                                pane.threadId ?? undefined,
+                              )}
+                            onDecline={() =>
+                              messages.decline(
+                                message.approval!.id,
+                                resolvePaneCollaborationMode(pane),
+                                pane.threadId ?? undefined,
+                              )}
+                            onCancel={() => messages.cancel(message.approval!.id, pane.threadId ?? undefined)}
+                          />
+                        {:else if message.kind === "user-input-request" && message.userInputRequest}
+                          <UserInputPrompt
+                            request={message.userInputRequest}
+                            onSubmit={(answers) =>
+                              messages.respondToUserInput(
+                                message.id,
+                                answers,
+                                resolvePaneCollaborationMode(pane),
+                                pane.threadId ?? undefined,
+                              )}
+                          />
+                        {:else if message.kind === "plan"}
+                          <PlanCard
+                            {message}
+                            disabled={(messages.getThreadTurnStatus(pane.threadId) ?? "").toLowerCase() === "inprogress" || !socket.isHealthy}
+                            latest={message.id === lastPlanIdForPane(pane)}
+                            onApprove={() => handlePanePlanApprove(pane.id, message.id)}
+                          />
+                        {:else}
+                          <MessageBlock {message} />
+                        {/if}
                       {/each}
                     {/if}
                   </div>
+                  <form
+                    class="pane-terminal-input row"
+                    onsubmit={(e) => {
+                      e.preventDefault();
+                      handleTerminalInputSubmit(pane.id);
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="Type message or /u command for this window"
+                      value={pane.terminalInput}
+                      oninput={(e) => handleTerminalInputChange(pane.id, (e.currentTarget as HTMLInputElement).value)}
+                      disabled={!pane.threadId || !isConnected || paneIsRunning(pane)}
+                    />
+                    <button type="submit" disabled={!canSendTerminalInput(pane)}>
+                      Send
+                    </button>
+                  </form>
                 </section>
               {/if}
             </div>
@@ -652,6 +769,48 @@
     max-height: 15rem;
     overflow-y: auto;
     padding: var(--space-xs) 0;
+  }
+
+  .pane-terminal-input {
+    --row-gap: var(--space-xs);
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs);
+    border-top: 1px solid var(--cli-border);
+    background: var(--cli-bg-elevated);
+  }
+
+  .pane-terminal-input input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-sm);
+    padding: 0.35rem 0.45rem;
+    background: var(--cli-bg);
+    color: var(--cli-text);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+
+  .pane-terminal-input input:focus {
+    outline: none;
+    border-color: var(--cli-prefix-agent);
+  }
+
+  .pane-terminal-input button {
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-sm);
+    padding: 0.28rem 0.52rem;
+    background: transparent;
+    color: var(--cli-prefix-agent);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+
+  .pane-terminal-input button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .pane-terminal-empty {
