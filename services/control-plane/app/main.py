@@ -45,7 +45,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Codex Remote FastAPI Control Plane", version="0.2.0", lifespan=lifespan)
-hub = RelayHub()
+hub = RelayHub(db)
 
 app.add_middleware(
     CORSMiddleware,
@@ -120,6 +120,26 @@ def _find_user_by_name(username: str):
     return db.get_user_by_name_case_insensitive(username)
 
 
+def _serialize_relay_artifact_record(record) -> dict[str, Any]:
+    payload: Any
+    try:
+        payload = json.loads(record.payload_json)
+    except Exception:
+        payload = record.payload_json
+    return {
+        "id": record.id,
+        "threadId": record.thread_id,
+        "turnId": record.turn_id,
+        "anchorId": record.anchor_id,
+        "itemId": record.item_id,
+        "artifactType": record.artifact_type,
+        "itemType": record.item_type,
+        "summary": record.summary,
+        "payload": payload,
+        "createdAt": record.created_at,
+    }
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {
@@ -127,6 +147,21 @@ async def health() -> dict[str, Any]:
         "authMode": settings.auth_mode,
         "clients": len(hub.client_sockets),
         "anchors": len(hub.anchor_sockets),
+    }
+
+
+@app.get("/relay/artifacts")
+async def relay_artifacts(
+    request: Request,
+    threadId: str | None = None,
+    limit: int = 50,
+    beforeId: int | None = None,
+) -> dict[str, Any]:
+    user = require_authenticated_user(request)
+    records = db.list_relay_artifacts(user_id=user.id, thread_id=threadId, limit=limit, before_id=beforeId)
+    return {
+        "artifacts": [_serialize_relay_artifact_record(record) for record in records],
+        "nextBeforeId": records[-1].id if records else None,
     }
 
 

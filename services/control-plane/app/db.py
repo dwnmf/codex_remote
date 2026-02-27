@@ -69,6 +69,40 @@ class AnchorSessionRecord:
     revoked_at: int | None
 
 
+@dataclass
+class RelayThreadState:
+    user_id: str
+    thread_id: str
+    bound_anchor_id: str | None
+    turn_id: str | None
+    turn_status: str | None
+    updated_at: int
+
+
+@dataclass
+class RelayMessageRecord:
+    id: int
+    user_id: str
+    thread_id: str
+    raw_data: str
+    created_at: int
+
+
+@dataclass
+class RelayArtifactRecord:
+    id: int
+    user_id: str
+    thread_id: str
+    turn_id: str | None
+    anchor_id: str | None
+    item_id: str
+    artifact_type: str
+    item_type: str
+    summary: str | None
+    payload_json: str
+    created_at: int
+
+
 class UserNameAlreadyExistsError(Exception):
     pass
 
@@ -82,6 +116,9 @@ def _hash_token(token: str) -> str:
 
 
 class Database:
+    RELAY_MESSAGE_RETENTION_PER_THREAD = 200
+    RELAY_ARTIFACT_RETENTION_PER_THREAD = 200
+
     def __init__(self, db_path: str) -> None:
         self.path = Path(db_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +214,50 @@ class Database:
             );
             CREATE INDEX IF NOT EXISTS idx_anchor_sessions_access ON anchor_sessions(access_token_hash);
             CREATE INDEX IF NOT EXISTS idx_anchor_sessions_refresh ON anchor_sessions(refresh_token_hash);
+
+            CREATE TABLE IF NOT EXISTS relay_thread_state (
+                user_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                bound_anchor_id TEXT,
+                turn_id TEXT,
+                turn_status TEXT,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY(user_id, thread_id),
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_relay_thread_state_user_updated
+                ON relay_thread_state(user_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS relay_thread_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                raw_data TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_relay_thread_messages_user_thread_id
+                ON relay_thread_messages(user_id, thread_id, id DESC);
+
+            CREATE TABLE IF NOT EXISTS relay_artifacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                turn_id TEXT,
+                anchor_id TEXT,
+                item_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                item_type TEXT NOT NULL,
+                summary TEXT,
+                payload_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                UNIQUE(user_id, thread_id, item_id),
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_relay_artifacts_user_thread_id
+                ON relay_artifacts(user_id, thread_id, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_relay_artifacts_user_id
+                ON relay_artifacts(user_id, id DESC);
             """
         )
         self._conn.commit()
@@ -618,6 +699,256 @@ class Database:
 
         self._conn.commit()
         return self.create_anchor_session(row["user_id"])
+
+    def get_relay_thread_state(self, user_id: str, thread_id: str) -> RelayThreadState | None:
+        row = self._conn.execute(
+            """
+            SELECT user_id, thread_id, bound_anchor_id, turn_id, turn_status, updated_at
+            FROM relay_thread_state
+            WHERE user_id = ? AND thread_id = ?
+            """,
+            (user_id, thread_id),
+        ).fetchone()
+        if not row:
+            return None
+        return RelayThreadState(
+            user_id=row["user_id"],
+            thread_id=row["thread_id"],
+            bound_anchor_id=row["bound_anchor_id"],
+            turn_id=row["turn_id"],
+            turn_status=row["turn_status"],
+            updated_at=row["updated_at"],
+        )
+
+    def set_relay_thread_anchor(self, user_id: str, thread_id: str, bound_anchor_id: str | None) -> None:
+        now = _now_sec()
+        self._conn.execute(
+            """
+            INSERT INTO relay_thread_state (user_id, thread_id, bound_anchor_id, turn_id, turn_status, updated_at)
+            VALUES (?, ?, ?, NULL, NULL, ?)
+            ON CONFLICT(user_id, thread_id) DO UPDATE SET
+                bound_anchor_id = excluded.bound_anchor_id,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, thread_id, bound_anchor_id, now),
+        )
+        self._conn.commit()
+
+    def set_relay_thread_turn(self, user_id: str, thread_id: str, turn_id: str | None, turn_status: str | None) -> None:
+        now = _now_sec()
+        self._conn.execute(
+            """
+            INSERT INTO relay_thread_state (user_id, thread_id, bound_anchor_id, turn_id, turn_status, updated_at)
+            VALUES (?, ?, NULL, ?, ?, ?)
+            ON CONFLICT(user_id, thread_id) DO UPDATE SET
+                turn_id = excluded.turn_id,
+                turn_status = excluded.turn_status,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, thread_id, turn_id, turn_status, now),
+        )
+        self._conn.commit()
+
+    def append_relay_thread_message(
+        self,
+        user_id: str,
+        thread_id: str,
+        raw_data: str,
+        max_messages: int | None = None,
+    ) -> RelayMessageRecord:
+        now = _now_sec()
+        retention = max_messages or self.RELAY_MESSAGE_RETENTION_PER_THREAD
+
+        self._conn.execute(
+            """
+            INSERT INTO relay_thread_state (user_id, thread_id, bound_anchor_id, turn_id, turn_status, updated_at)
+            VALUES (?, ?, NULL, NULL, NULL, ?)
+            ON CONFLICT(user_id, thread_id) DO UPDATE SET
+                updated_at = excluded.updated_at
+            """,
+            (user_id, thread_id, now),
+        )
+
+        row = self._conn.execute(
+            """
+            INSERT INTO relay_thread_messages (user_id, thread_id, raw_data, created_at)
+            VALUES (?, ?, ?, ?)
+            RETURNING id, user_id, thread_id, raw_data, created_at
+            """,
+            (user_id, thread_id, raw_data, now),
+        ).fetchone()
+
+        self._conn.execute(
+            """
+            DELETE FROM relay_thread_messages
+            WHERE user_id = ? AND thread_id = ? AND id NOT IN (
+                SELECT id
+                FROM relay_thread_messages
+                WHERE user_id = ? AND thread_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+            )
+            """,
+            (user_id, thread_id, user_id, thread_id, retention),
+        )
+        self._conn.commit()
+
+        return RelayMessageRecord(
+            id=row["id"],
+            user_id=row["user_id"],
+            thread_id=row["thread_id"],
+            raw_data=row["raw_data"],
+            created_at=row["created_at"],
+        )
+
+    def list_relay_thread_messages(self, user_id: str, thread_id: str, limit: int = 100) -> list[RelayMessageRecord]:
+        safe_limit = max(1, min(limit, self.RELAY_MESSAGE_RETENTION_PER_THREAD))
+        rows = self._conn.execute(
+            """
+            SELECT id, user_id, thread_id, raw_data, created_at
+            FROM relay_thread_messages
+            WHERE user_id = ? AND thread_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (user_id, thread_id, safe_limit),
+        ).fetchall()
+
+        records = [
+            RelayMessageRecord(
+                id=row["id"],
+                user_id=row["user_id"],
+                thread_id=row["thread_id"],
+                raw_data=row["raw_data"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+        records.reverse()
+        return records
+
+    def upsert_relay_artifact(
+        self,
+        user_id: str,
+        thread_id: str,
+        turn_id: str | None,
+        anchor_id: str | None,
+        item_id: str,
+        artifact_type: str,
+        item_type: str,
+        summary: str | None,
+        payload_json: str,
+        max_artifacts_per_thread: int | None = None,
+    ) -> RelayArtifactRecord:
+        now = _now_sec()
+        retention = max_artifacts_per_thread or self.RELAY_ARTIFACT_RETENTION_PER_THREAD
+
+        self._conn.execute(
+            """
+            INSERT INTO relay_thread_state (user_id, thread_id, bound_anchor_id, turn_id, turn_status, updated_at)
+            VALUES (?, ?, NULL, NULL, NULL, ?)
+            ON CONFLICT(user_id, thread_id) DO UPDATE SET
+                updated_at = excluded.updated_at
+            """,
+            (user_id, thread_id, now),
+        )
+
+        row = self._conn.execute(
+            """
+            INSERT INTO relay_artifacts (
+                user_id, thread_id, turn_id, anchor_id, item_id, artifact_type, item_type, summary, payload_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, thread_id, item_id) DO UPDATE SET
+                turn_id = excluded.turn_id,
+                anchor_id = excluded.anchor_id,
+                artifact_type = excluded.artifact_type,
+                item_type = excluded.item_type,
+                summary = excluded.summary,
+                payload_json = excluded.payload_json,
+                created_at = excluded.created_at
+            RETURNING id, user_id, thread_id, turn_id, anchor_id, item_id, artifact_type, item_type, summary, payload_json, created_at
+            """,
+            (user_id, thread_id, turn_id, anchor_id, item_id, artifact_type, item_type, summary, payload_json, now),
+        ).fetchone()
+
+        self._conn.execute(
+            """
+            DELETE FROM relay_artifacts
+            WHERE user_id = ? AND thread_id = ? AND id NOT IN (
+                SELECT id
+                FROM relay_artifacts
+                WHERE user_id = ? AND thread_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+            )
+            """,
+            (user_id, thread_id, user_id, thread_id, retention),
+        )
+        self._conn.commit()
+
+        return RelayArtifactRecord(
+            id=row["id"],
+            user_id=row["user_id"],
+            thread_id=row["thread_id"],
+            turn_id=row["turn_id"],
+            anchor_id=row["anchor_id"],
+            item_id=row["item_id"],
+            artifact_type=row["artifact_type"],
+            item_type=row["item_type"],
+            summary=row["summary"],
+            payload_json=row["payload_json"],
+            created_at=row["created_at"],
+        )
+
+    def list_relay_artifacts(
+        self,
+        user_id: str,
+        thread_id: str | None = None,
+        limit: int = 50,
+        before_id: int | None = None,
+    ) -> list[RelayArtifactRecord]:
+        safe_limit = max(1, min(limit, 200))
+        clauses = ["user_id = ?"]
+        args: list[str | int] = [user_id]
+
+        if thread_id:
+            clauses.append("thread_id = ?")
+            args.append(thread_id)
+        if before_id is not None:
+            clauses.append("id < ?")
+            args.append(before_id)
+
+        where_clause = " AND ".join(clauses)
+        args.append(safe_limit)
+
+        rows = self._conn.execute(
+            f"""
+            SELECT id, user_id, thread_id, turn_id, anchor_id, item_id, artifact_type, item_type, summary, payload_json, created_at
+            FROM relay_artifacts
+            WHERE {where_clause}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            tuple(args),
+        ).fetchall()
+
+        return [
+            RelayArtifactRecord(
+                id=row["id"],
+                user_id=row["user_id"],
+                thread_id=row["thread_id"],
+                turn_id=row["turn_id"],
+                anchor_id=row["anchor_id"],
+                item_id=row["item_id"],
+                artifact_type=row["artifact_type"],
+                item_type=row["item_type"],
+                summary=row["summary"],
+                payload_json=row["payload_json"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
 
 
 db = Database(settings.database_path)

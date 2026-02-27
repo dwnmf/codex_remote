@@ -1,6 +1,19 @@
 import { sendPush, type PushPayload, type VapidKeys } from "../push";
 import type { Env, Role } from "../types";
 import { asRecord, extractAnchorId, extractMethod, extractThreadId, parseJsonMessage } from "../utils/protocol";
+import {
+  MAX_STORED_THREADS,
+  MULTI_DISPATCH_TIMEOUT_MS,
+  applyThreadStateMutation,
+  buildMultiDispatchAggregate,
+  buildThreadStateMutationFromMessage,
+  createEmptyThreadState,
+  normalizeStoredThreadState,
+  parseMultiDispatchRequest,
+  type MultiDispatchResultEntry,
+  type RelayThreadState,
+  type ThreadStateMutation,
+} from "./orbit-relay-state";
 
 interface AnchorMeta {
   id: string;
@@ -14,7 +27,25 @@ interface RouteFailure {
   message: string;
 }
 
+interface PendingMultiDispatchChild {
+  parentKey: string;
+  anchorId: string;
+  childId: string | number;
+}
+
+interface PendingMultiDispatch {
+  clientSocket: WebSocket;
+  requestId: string | number | null;
+  threadId: string | null;
+  results: MultiDispatchResultEntry[];
+  pendingRouteKeys: Set<string>;
+  timeoutHandle: ReturnType<typeof setTimeout> | null;
+}
+
+const THREAD_STATE_PREFIX = "relay:thread:";
+
 export class OrbitRelay {
+  private state: DurableObjectState;
   private env: Env;
   private userId: string | null = null;
 
@@ -34,8 +65,25 @@ export class OrbitRelay {
   private pendingClientRequests = new Map<string, WebSocket>(); // (anchorSocket,id) -> clientSocket
   private pendingAnchorRequests = new Map<string, WebSocket>(); // (clientSocket,id) -> anchorSocket
 
-  constructor(_state: DurableObjectState, env: Env) {
+  // Durable thread state
+  private threadStateById = new Map<string, RelayThreadState>();
+  private pendingThreadStateWrites = new Set<string>();
+  private pendingThreadStateDeletes = new Set<string>();
+  private threadStateFlushScheduled = false;
+  private threadStateWriteQueue: Promise<void> = Promise.resolve();
+  private storageReady: Promise<void>;
+
+  // Multi-dispatch orchestration
+  private pendingMultiDispatch = new Map<string, PendingMultiDispatch>();
+  private pendingMultiDispatchByChildRoute = new Map<string, PendingMultiDispatchChild>();
+  private multiDispatchSeq = 0;
+
+  constructor(state: DurableObjectState, env: Env) {
+    this.state = state;
     this.env = env;
+    this.storageReady = this.state.blockConcurrencyWhile(async () => {
+      await this.loadPersistedThreadState();
+    });
   }
 
   fetch(req: Request): Response {
@@ -88,13 +136,11 @@ export class OrbitRelay {
 
     source.set(socket, new Set());
 
-    socket.send(
-      JSON.stringify({
-        type: "orbit.hello",
-        role,
-        ts: new Date().toISOString(),
-      })
-    );
+    this.sendJson(socket, {
+      type: "orbit.hello",
+      role,
+      ts: new Date().toISOString(),
+    });
 
     socket.addEventListener("message", (event) => {
       if (this.handlePing(socket, event.data)) {
@@ -112,7 +158,7 @@ export class OrbitRelay {
         return;
       }
 
-      this.routeMessage(socket, role, event.data, parsed);
+      this.routeMessage(socket, role, event.data, payloadStr, parsed);
     });
 
     const cleanup = () => {
@@ -136,23 +182,21 @@ export class OrbitRelay {
       if (role === "anchor") {
         const anchorId = this.anchorMeta.get(socket)?.id;
         if (anchorId) {
-          this.threadToAnchorId.set(msg.threadId, anchorId);
+          this.bindThreadToAnchor(msg.threadId, anchorId);
         }
       }
-      try {
-        socket.send(JSON.stringify({ type: "orbit.subscribed", threadId: msg.threadId }));
-      } catch {
-        // ignore
-      }
+      this.sendJson(socket, { type: "orbit.subscribed", threadId: msg.threadId });
       console.log(`[orbit] ${role} subscribed to thread ${msg.threadId}`);
 
-      // Notify anchors so they can re-send any pending approval from memory
       if (role === "client") {
+        this.replayThreadState(socket, msg.threadId);
+
+        // Notify anchors so they can re-send any pending approval from memory.
         const notification = JSON.stringify({ type: "orbit.client-subscribed", threadId: msg.threadId });
         const anchors = this.threadToAnchors.get(msg.threadId);
         if (anchors) {
           for (const anchor of anchors) {
-            try { anchor.send(notification); } catch { /* ignore */ }
+            this.sendToSocket(anchor, notification);
           }
         }
       }
@@ -168,26 +212,40 @@ export class OrbitRelay {
 
     if (msg.type === "orbit.list-anchors" && role === "client") {
       const anchors = Array.from(this.anchorMeta.values());
-      try {
-        socket.send(JSON.stringify({ type: "orbit.anchors", anchors }));
-      } catch {
-        // ignore
-      }
+      this.sendJson(socket, { type: "orbit.anchors", anchors });
+      return true;
+    }
+
+    if (msg.type === "orbit.artifacts.list") {
+      const threadId = this.extractControlThreadId(msg);
+      const requestId = this.extractMessageId(msg);
+      const artifacts = threadId ? this.threadStateById.get(threadId)?.artifacts ?? [] : [];
+      this.sendJson(socket, {
+        type: "orbit.artifacts",
+        ...(requestId !== null ? { id: requestId } : {}),
+        threadId,
+        artifacts,
+      });
+      return true;
+    }
+
+    if (msg.type === "orbit.multi-dispatch" && role === "client") {
+      this.handleMultiDispatch(socket, msg);
       return true;
     }
 
     if (msg.type === "orbit.push-subscribe" && role === "client") {
-      this.savePushSubscription(msg);
+      void this.savePushSubscription(msg);
       return true;
     }
 
     if (msg.type === "orbit.push-unsubscribe" && role === "client") {
-      this.removePushSubscription(msg);
+      void this.removePushSubscription(msg);
       return true;
     }
 
     if (msg.type === "orbit.push-test" && role === "client") {
-      this.sendTestPush(socket);
+      void this.sendTestPush(socket);
       return true;
     }
 
@@ -225,11 +283,7 @@ export class OrbitRelay {
 
     const notification = JSON.stringify({ type: "orbit.anchor-connected", anchor: meta });
     for (const clientSocket of this.clientSockets.keys()) {
-      try {
-        clientSocket.send(notification);
-      } catch {
-        // ignore
-      }
+      this.sendToSocket(clientSocket, notification);
     }
 
     return true;
@@ -311,11 +365,7 @@ export class OrbitRelay {
         this.anchorMeta.delete(socket);
         const notification = JSON.stringify({ type: "orbit.anchor-disconnected", anchorId: meta.id });
         for (const clientSocket of this.clientSockets.keys()) {
-          try {
-            clientSocket.send(notification);
-          } catch {
-            // ignore
-          }
+          this.sendToSocket(clientSocket, notification);
         }
       }
     }
@@ -333,9 +383,17 @@ export class OrbitRelay {
         this.pendingAnchorRequests.delete(key);
       }
     }
+
+    this.cleanupMultiDispatchForSocket(socket, role);
   }
 
-  private routeMessage(socket: WebSocket, role: Role, data: string | ArrayBuffer | ArrayBufferView, msg: Record<string, unknown> | null): void {
+  private routeMessage(
+    socket: WebSocket,
+    role: Role,
+    data: string | ArrayBuffer | ArrayBufferView,
+    payloadStr: string | null,
+    msg: Record<string, unknown> | null,
+  ): void {
     const threadId = msg ? extractThreadId(msg) : null;
     const anchorId = msg ? extractAnchorId(msg) : null;
     const requestId = this.extractMessageId(msg);
@@ -361,7 +419,7 @@ export class OrbitRelay {
       if (threadId) {
         const boundAnchorId = this.socketToAnchorId.get(resolved.target);
         if (boundAnchorId) {
-          this.threadToAnchorId.set(threadId, boundAnchorId);
+          this.bindThreadToAnchor(threadId, boundAnchorId);
         }
       }
 
@@ -374,9 +432,13 @@ export class OrbitRelay {
     }
 
     if (requestKey && !hasMethod) {
+      if (msg && this.handleMultiDispatchChildResponse(socket, msg, requestKey)) {
+        return;
+      }
+
       const sourceAnchorId = this.socketToAnchorId.get(socket);
       if (threadId && sourceAnchorId) {
-        this.threadToAnchorId.set(threadId, sourceAnchorId);
+        this.bindThreadToAnchor(threadId, sourceAnchorId);
       }
       const responseTarget = this.pendingClientRequests.get(this.routeKey(socket, requestKey));
       if (responseTarget) {
@@ -388,7 +450,7 @@ export class OrbitRelay {
 
     const sourceAnchorId = this.socketToAnchorId.get(socket);
     if (threadId && sourceAnchorId) {
-      this.threadToAnchorId.set(threadId, sourceAnchorId);
+      this.bindThreadToAnchor(threadId, sourceAnchorId);
     }
 
     const targets =
@@ -406,11 +468,14 @@ export class OrbitRelay {
       this.sendToSocket(target, data);
     }
 
-    // Send push notification for blocking events (async, non-blocking)
+    if (msg && payloadStr) {
+      this.captureThreadStateFromMessage(msg, payloadStr, sourceAnchorId);
+    }
+
     if (msg) {
       const method = extractMethod(msg);
       if (method && this.isPushWorthy(method)) {
-        this.sendPushNotifications(msg, method, threadId);
+        void this.sendPushNotifications(msg, method, threadId);
       }
     }
   }
@@ -460,6 +525,472 @@ export class OrbitRelay {
     return { target: null, failure: { code: "anchor_required", message: "Select a device before starting a request." } };
   }
 
+  private handleMultiDispatch(socket: WebSocket, message: Record<string, unknown>): void {
+    const parsed = parseMultiDispatchRequest(message);
+    if (!parsed) {
+      const requestId = this.extractMessageId(message);
+      this.sendJson(socket, {
+        type: "orbit.multi-dispatch.result",
+        id: requestId,
+        threadId: null,
+        results: [],
+        summary: { total: 0, ok: 0, failed: 0, timedOut: 0 },
+      });
+      return;
+    }
+
+    const explicitTargets = parsed.anchorIds.length > 0;
+    const targetAnchorIds = explicitTargets ? parsed.anchorIds : this.resolveMultiDispatchTargets(parsed.threadId);
+    const immediateResults: MultiDispatchResultEntry[] = [];
+    const dispatchTargets: Array<{ anchorId: string; socket: WebSocket }> = [];
+
+    for (const targetAnchorId of targetAnchorIds) {
+      const targetSocket = this.anchorIdToSocket.get(targetAnchorId);
+      if (!targetSocket) {
+        immediateResults.push({
+          anchorId: targetAnchorId,
+          childId: `missing-${targetAnchorId}`,
+          ok: false,
+          error: this.routeFailureAsRpcError(
+            explicitTargets
+              ? { code: "anchor_not_found", message: "Selected device is unavailable." }
+              : { code: "anchor_offline", message: "Device for this thread is offline." },
+          ),
+        });
+        continue;
+      }
+      dispatchTargets.push({ anchorId: targetAnchorId, socket: targetSocket });
+    }
+
+    if (dispatchTargets.length === 0) {
+      if (immediateResults.length === 0) {
+        immediateResults.push({
+          anchorId: "",
+          childId: "none",
+          ok: false,
+          error: this.routeFailureAsRpcError({ code: "anchor_offline", message: "No devices are connected." }),
+        });
+      }
+      this.sendJson(socket, buildMultiDispatchAggregate(parsed.requestId, parsed.threadId, immediateResults));
+      return;
+    }
+
+    const parentKey = this.buildMultiDispatchParentKey(socket, parsed.requestId);
+    const pending: PendingMultiDispatch = {
+      clientSocket: socket,
+      requestId: parsed.requestId,
+      threadId: parsed.threadId,
+      results: [...immediateResults],
+      pendingRouteKeys: new Set(),
+      timeoutHandle: null,
+    };
+
+    for (const target of dispatchTargets) {
+      const childId = this.nextMultiDispatchChildId();
+      const childPayload = this.buildMultiDispatchChildPayload(parsed.childRequest, childId, parsed.threadId, target.anchorId);
+      const childRequestKey = this.messageIdKey(childId);
+      if (!childRequestKey) {
+        pending.results.push({
+          anchorId: target.anchorId,
+          childId,
+          ok: false,
+          error: this.routeFailureAsRpcError({ code: "invalid_request", message: "Failed to generate child request id." }),
+        });
+        continue;
+      }
+
+      const childRouteKey = this.routeKey(target.socket, childRequestKey);
+      this.pendingMultiDispatchByChildRoute.set(childRouteKey, {
+        parentKey,
+        anchorId: target.anchorId,
+        childId,
+      });
+      pending.pendingRouteKeys.add(childRouteKey);
+
+      const sent = this.sendToSocket(target.socket, JSON.stringify(childPayload));
+      if (!sent) {
+        this.pendingMultiDispatchByChildRoute.delete(childRouteKey);
+        pending.pendingRouteKeys.delete(childRouteKey);
+        pending.results.push({
+          anchorId: target.anchorId,
+          childId,
+          ok: false,
+          error: this.routeFailureAsRpcError({ code: "anchor_offline", message: "Device for this thread is offline." }),
+        });
+      }
+    }
+
+    if (pending.pendingRouteKeys.size === 0) {
+      this.sendJson(socket, buildMultiDispatchAggregate(parsed.requestId, parsed.threadId, pending.results));
+      return;
+    }
+
+    this.pendingMultiDispatch.set(parentKey, pending);
+    pending.timeoutHandle = setTimeout(() => {
+      this.timeoutMultiDispatch(parentKey);
+    }, MULTI_DISPATCH_TIMEOUT_MS);
+  }
+
+  private resolveMultiDispatchTargets(threadId: string | null): string[] {
+    const result = new Set<string>();
+
+    if (threadId) {
+      const boundAnchorId = this.threadToAnchorId.get(threadId);
+      if (boundAnchorId) {
+        result.add(boundAnchorId);
+      }
+
+      const anchors = this.threadToAnchors.get(threadId);
+      if (anchors) {
+        for (const anchorSocket of anchors) {
+          const anchorId = this.socketToAnchorId.get(anchorSocket);
+          if (anchorId) result.add(anchorId);
+        }
+      }
+    }
+
+    if (result.size > 0) {
+      return Array.from(result);
+    }
+
+    return Array.from(this.anchorIdToSocket.keys());
+  }
+
+  private buildMultiDispatchParentKey(socket: WebSocket, requestId: string | number | null): string {
+    const socketId = this.socketId(socket);
+    const requestKey = requestId !== null ? this.messageIdKey(requestId) ?? this.nextMultiDispatchChildId() : this.nextMultiDispatchChildId();
+    return `${socketId}:multi:${requestKey}`;
+  }
+
+  private nextMultiDispatchChildId(): string {
+    this.multiDispatchSeq += 1;
+    return `multi-${Date.now()}-${this.multiDispatchSeq}`;
+  }
+
+  private buildMultiDispatchChildPayload(
+    childRequest: Record<string, unknown>,
+    childId: string,
+    threadId: string | null,
+    anchorId: string,
+  ): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
+      ...childRequest,
+      id: childId,
+    };
+
+    delete payload.type;
+    delete payload.anchorIds;
+    delete payload.anchors;
+    delete payload.request;
+    delete payload.rpc;
+
+    const params = asRecord(payload.params) ?? {};
+    let nextParams: Record<string, unknown> = { ...params };
+    if (threadId && typeof nextParams.threadId !== "string" && typeof nextParams.thread_id !== "string") {
+      nextParams = { ...nextParams, threadId };
+    }
+    if (typeof nextParams.anchorId !== "string" && typeof nextParams.anchor_id !== "string") {
+      nextParams = { ...nextParams, anchorId };
+    }
+    payload.params = nextParams;
+
+    return payload;
+  }
+
+  private handleMultiDispatchChildResponse(anchorSocket: WebSocket, message: Record<string, unknown>, requestKey: string): boolean {
+    const childRouteKey = this.routeKey(anchorSocket, requestKey);
+    const child = this.pendingMultiDispatchByChildRoute.get(childRouteKey);
+    if (!child) return false;
+
+    this.pendingMultiDispatchByChildRoute.delete(childRouteKey);
+
+    const pending = this.pendingMultiDispatch.get(child.parentKey);
+    if (!pending) return true;
+    pending.pendingRouteKeys.delete(childRouteKey);
+
+    const hasError = Object.prototype.hasOwnProperty.call(message, "error") && message.error !== undefined;
+    pending.results.push({
+      anchorId: child.anchorId,
+      childId: child.childId,
+      ok: !hasError,
+      ...(hasError ? { error: message.error } : { result: message.result }),
+    });
+
+    if (pending.pendingRouteKeys.size === 0) {
+      this.finishMultiDispatch(child.parentKey);
+    }
+
+    return true;
+  }
+
+  private timeoutMultiDispatch(parentKey: string): void {
+    const pending = this.pendingMultiDispatch.get(parentKey);
+    if (!pending) return;
+
+    for (const childRouteKey of pending.pendingRouteKeys) {
+      const child = this.pendingMultiDispatchByChildRoute.get(childRouteKey);
+      if (!child) continue;
+
+      this.pendingMultiDispatchByChildRoute.delete(childRouteKey);
+      pending.results.push({
+        anchorId: child.anchorId,
+        childId: child.childId,
+        ok: false,
+        error: this.routeFailureAsRpcError({ code: "timeout", message: "Timed out waiting for anchor response." }),
+      });
+    }
+    pending.pendingRouteKeys.clear();
+    this.finishMultiDispatch(parentKey);
+  }
+
+  private finishMultiDispatch(parentKey: string): void {
+    const pending = this.pendingMultiDispatch.get(parentKey);
+    if (!pending) return;
+
+    this.pendingMultiDispatch.delete(parentKey);
+    if (pending.timeoutHandle) {
+      clearTimeout(pending.timeoutHandle);
+      pending.timeoutHandle = null;
+    }
+
+    this.sendJson(
+      pending.clientSocket,
+      buildMultiDispatchAggregate(pending.requestId, pending.threadId, pending.results),
+    );
+  }
+
+  private cleanupMultiDispatchForSocket(socket: WebSocket, role: Role): void {
+    if (role === "client") {
+      const parentsToDiscard: string[] = [];
+      for (const [parentKey, pending] of this.pendingMultiDispatch.entries()) {
+        if (pending.clientSocket === socket) {
+          parentsToDiscard.push(parentKey);
+        }
+      }
+      for (const parentKey of parentsToDiscard) {
+        this.discardMultiDispatch(parentKey);
+      }
+    }
+
+    const removedSocketId = this.socketId(socket);
+    const parentsToFinish = new Set<string>();
+    for (const [childRouteKey, child] of this.pendingMultiDispatchByChildRoute.entries()) {
+      if (!childRouteKey.startsWith(`${removedSocketId}:`)) continue;
+      this.pendingMultiDispatchByChildRoute.delete(childRouteKey);
+
+      const pending = this.pendingMultiDispatch.get(child.parentKey);
+      if (!pending) continue;
+      pending.pendingRouteKeys.delete(childRouteKey);
+      pending.results.push({
+        anchorId: child.anchorId,
+        childId: child.childId,
+        ok: false,
+        error: this.routeFailureAsRpcError({ code: "anchor_offline", message: "Device for this thread is offline." }),
+      });
+
+      if (pending.pendingRouteKeys.size === 0) {
+        parentsToFinish.add(child.parentKey);
+      }
+    }
+
+    for (const parentKey of parentsToFinish) {
+      this.finishMultiDispatch(parentKey);
+    }
+  }
+
+  private discardMultiDispatch(parentKey: string): void {
+    const pending = this.pendingMultiDispatch.get(parentKey);
+    if (!pending) return;
+    this.pendingMultiDispatch.delete(parentKey);
+    if (pending.timeoutHandle) {
+      clearTimeout(pending.timeoutHandle);
+      pending.timeoutHandle = null;
+    }
+    for (const [childRouteKey, child] of this.pendingMultiDispatchByChildRoute.entries()) {
+      if (child.parentKey === parentKey) {
+        this.pendingMultiDispatchByChildRoute.delete(childRouteKey);
+      }
+    }
+  }
+
+  private bindThreadToAnchor(threadId: string, anchorId: string): void {
+    this.threadToAnchorId.set(threadId, anchorId);
+    this.applyThreadStateMutationAndPersist({ threadId, anchorId });
+  }
+
+  private captureThreadStateFromMessage(message: Record<string, unknown>, rawPayload: string, sourceAnchorId: string | undefined): void {
+    const mutation = buildThreadStateMutationFromMessage(message, rawPayload);
+    if (!mutation) return;
+
+    if (sourceAnchorId) {
+      mutation.anchorId = sourceAnchorId;
+    }
+
+    if (message._replay === true) {
+      mutation.recentMessage = undefined;
+      mutation.artifact = undefined;
+    }
+
+    const hasMeaningfulChange =
+      mutation.anchorId !== undefined
+      || mutation.turnId !== undefined
+      || mutation.turnStatus !== undefined
+      || mutation.recentMessage !== undefined
+      || mutation.artifact !== undefined;
+    if (!hasMeaningfulChange) return;
+
+    this.applyThreadStateMutationAndPersist(mutation);
+  }
+
+  private applyThreadStateMutationAndPersist(mutation: ThreadStateMutation): void {
+    const existing = this.threadStateById.get(mutation.threadId) ?? createEmptyThreadState(mutation.threadId);
+    const next = applyThreadStateMutation(existing, mutation);
+
+    if (this.threadStateById.has(mutation.threadId)) {
+      this.threadStateById.delete(mutation.threadId);
+    }
+    this.threadStateById.set(mutation.threadId, next);
+
+    if (next.anchorId) {
+      this.threadToAnchorId.set(mutation.threadId, next.anchorId);
+    }
+
+    this.pendingThreadStateWrites.add(mutation.threadId);
+    this.pendingThreadStateDeletes.delete(mutation.threadId);
+    this.enforceThreadStateRetention();
+    this.scheduleThreadStateFlush();
+  }
+
+  private enforceThreadStateRetention(): void {
+    while (this.threadStateById.size > MAX_STORED_THREADS) {
+      const oldestThreadId = this.threadStateById.keys().next().value as string | undefined;
+      if (!oldestThreadId) break;
+      this.threadStateById.delete(oldestThreadId);
+      this.threadToAnchorId.delete(oldestThreadId);
+      this.pendingThreadStateWrites.delete(oldestThreadId);
+      this.pendingThreadStateDeletes.add(oldestThreadId);
+    }
+  }
+
+  private scheduleThreadStateFlush(): void {
+    if (this.threadStateFlushScheduled) return;
+    this.threadStateFlushScheduled = true;
+
+    queueMicrotask(() => {
+      this.threadStateFlushScheduled = false;
+
+      const writes = Array.from(this.pendingThreadStateWrites);
+      const deletes = Array.from(this.pendingThreadStateDeletes);
+      this.pendingThreadStateWrites.clear();
+      this.pendingThreadStateDeletes.clear();
+
+      if (writes.length === 0 && deletes.length === 0) {
+        return;
+      }
+
+      this.threadStateWriteQueue = this.threadStateWriteQueue
+        .then(async () => {
+          await this.storageReady;
+          await this.flushThreadStateChanges(writes, deletes);
+        })
+        .catch((err) => {
+          console.warn("[orbit] failed to persist thread state", err);
+          for (const threadId of writes) {
+            this.pendingThreadStateWrites.add(threadId);
+          }
+          for (const threadId of deletes) {
+            this.pendingThreadStateDeletes.add(threadId);
+          }
+          this.scheduleThreadStateFlush();
+        });
+    });
+  }
+
+  private async flushThreadStateChanges(writes: string[], deletes: string[]): Promise<void> {
+    for (const threadId of writes) {
+      const state = this.threadStateById.get(threadId);
+      if (!state) continue;
+      await this.state.storage.put(this.threadStorageKey(threadId), state);
+    }
+    for (const threadId of deletes) {
+      await this.state.storage.delete(this.threadStorageKey(threadId));
+    }
+  }
+
+  private async loadPersistedThreadState(): Promise<void> {
+    const listed = await this.state.storage.list<unknown>({ prefix: THREAD_STATE_PREFIX });
+    const loaded: RelayThreadState[] = [];
+
+    for (const value of listed.values()) {
+      const normalized = normalizeStoredThreadState(value);
+      if (!normalized) continue;
+      loaded.push(normalized);
+    }
+
+    loaded.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+    const retained = loaded.slice(Math.max(0, loaded.length - MAX_STORED_THREADS));
+    const dropped = loaded.slice(0, Math.max(0, loaded.length - retained.length));
+
+    for (const state of retained) {
+      this.threadStateById.set(state.threadId, state);
+      if (state.anchorId) {
+        this.threadToAnchorId.set(state.threadId, state.anchorId);
+      }
+    }
+
+    if (dropped.length > 0) {
+      for (const state of dropped) {
+        this.pendingThreadStateDeletes.add(state.threadId);
+      }
+      this.scheduleThreadStateFlush();
+    }
+  }
+
+  private threadStorageKey(threadId: string): string {
+    return `${THREAD_STATE_PREFIX}${threadId}`;
+  }
+
+  private replayThreadState(socket: WebSocket, threadId: string): void {
+    const state = this.threadStateById.get(threadId);
+    if (!state) return;
+
+    this.replayTurnSnapshot(socket, state);
+
+    for (const raw of state.recentMessages) {
+      this.sendToSocket(socket, raw);
+    }
+  }
+
+  private replayTurnSnapshot(socket: WebSocket, state: RelayThreadState): void {
+    if (!state.turn.id || !state.turn.status) return;
+
+    const normalized = state.turn.status.toLowerCase();
+    let method: string | null = null;
+    if (normalized === "inprogress") method = "turn/started";
+    if (normalized === "completed") method = "turn/completed";
+    if (normalized === "failed") method = "turn/failed";
+    if (normalized === "cancelled") method = "turn/cancelled";
+    if (!method) return;
+
+    this.sendJson(socket, {
+      method,
+      params: {
+        threadId: state.threadId,
+        turn: {
+          id: state.turn.id,
+          status: state.turn.status,
+        },
+      },
+    });
+  }
+
+  private extractControlThreadId(msg: Record<string, unknown>): string | null {
+    if (typeof msg.threadId === "string" && msg.threadId.trim()) return msg.threadId;
+    const params = asRecord(msg.params);
+    if (typeof params?.threadId === "string" && params.threadId.trim()) return params.threadId;
+    return extractThreadId(msg);
+  }
+
   private extractMessageId(msg: Record<string, unknown> | null): string | number | null {
     if (!msg) return null;
     const value = msg.id;
@@ -485,36 +1016,40 @@ export class OrbitRelay {
     return anySocket.__orbit_socket_id;
   }
 
-  private sendToSocket(target: WebSocket, data: string | ArrayBuffer | ArrayBufferView): void {
+  private sendToSocket(target: WebSocket, data: string | ArrayBuffer | ArrayBufferView): boolean {
     try {
       target.send(data);
+      return true;
     } catch (err) {
       console.warn("[orbit] failed to relay message", err);
+      return false;
     }
+  }
+
+  private sendJson(socket: WebSocket, payload: Record<string, unknown>): boolean {
+    return this.sendToSocket(socket, JSON.stringify(payload));
+  }
+
+  private routeFailureAsRpcError(failure: RouteFailure): Record<string, unknown> {
+    return {
+      code: -32001,
+      message: failure.message,
+      data: { code: failure.code },
+    };
   }
 
   private sendRpcError(socket: WebSocket, requestId: string | number | null, failure: RouteFailure | null): void {
     if (requestId == null || !failure) return;
-    try {
-      socket.send(
-        JSON.stringify({
-          id: requestId,
-          error: {
-            code: -32001,
-            message: failure.message,
-            data: { code: failure.code },
-          },
-        })
-      );
-    } catch {
-      // ignore
-    }
+    this.sendJson(socket, {
+      id: requestId,
+      error: this.routeFailureAsRpcError(failure),
+    });
   }
 
   private dataToString(data: unknown): string | null {
     if (typeof data === "string") return data;
     if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
-    if (data instanceof Uint8Array) return new TextDecoder().decode(data);
+    if (ArrayBuffer.isView(data)) return new TextDecoder().decode(data);
     return null;
   }
 
@@ -524,9 +1059,7 @@ export class OrbitRelay {
 
     const trimmed = payload.trim();
     if (trimmed === '{"type":"ping"}') {
-      try {
-        socket.send(JSON.stringify({ type: "pong" }));
-      } catch {}
+      this.sendJson(socket, { type: "pong" });
       return true;
     }
 
@@ -690,5 +1223,4 @@ export class OrbitRelay {
       console.warn("[orbit] push-test: failed", err);
     }
   }
-
 }

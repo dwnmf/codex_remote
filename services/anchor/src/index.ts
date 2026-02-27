@@ -3,6 +3,11 @@ import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import type { WsClient } from "./types";
+import {
+  handleAnchorReleaseInspect,
+  handleAnchorReleaseStart,
+  handleAnchorReleaseStatus,
+} from "./release";
 
 const PORT = Number(process.env.ANCHOR_PORT ?? 8788);
 const ORBIT_URL = process.env.ANCHOR_ORBIT_URL ?? "";
@@ -685,6 +690,15 @@ async function maybeHandleAnchorLocalRpc(message: JsonObject): Promise<JsonObjec
   }
   if (message.method === "anchor.git.worktree.prune") {
     return handleGitWorktreePrune(id, params);
+  }
+  if (message.method === "anchor.release.inspect") {
+    return handleAnchorReleaseInspect(id, params);
+  }
+  if (message.method === "anchor.release.start") {
+    return handleAnchorReleaseStart(id, params);
+  }
+  if (message.method === "anchor.release.status") {
+    return handleAnchorReleaseStatus(id, params);
   }
   if (message.method === "anchor.config.read") {
     return handleCodexConfigRead(id, params);

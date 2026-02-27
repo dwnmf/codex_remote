@@ -6,6 +6,7 @@
     import { messages } from "../lib/messages.svelte";
     import { models } from "../lib/models.svelte";
     import { anchors } from "../lib/anchors.svelte";
+    import { artifacts as artifactsStore } from "../lib/artifacts.svelte";
     import { auth } from "../lib/auth.svelte";
     import { theme } from "../lib/theme.svelte";
     import {
@@ -23,6 +24,7 @@
     import WorkingStatus from "../lib/components/WorkingStatus.svelte";
     import Reasoning from "../lib/components/Reasoning.svelte";
     import PromptInput from "../lib/components/PromptInput.svelte";
+    import ArtifactsTimeline from "../lib/components/ArtifactsTimeline.svelte";
 
     const themeIcons = { system: "◐", light: "○", dark: "●" } as const;
 
@@ -36,6 +38,9 @@
     let turnStartTime = $state<number | undefined>(undefined);
 
     const threadId = $derived(route.params.id);
+    const threadArtifacts = $derived(artifactsStore.getThreadArtifacts(threadId));
+    const artifactsLoading = $derived(artifactsStore.getThreadLoading(threadId));
+    const artifactsError = $derived(artifactsStore.getThreadError(threadId));
     const selectedModelOption = $derived(models.options.find((option) => option.value === model) ?? null);
     const threadShortId = $derived(threadId ? threadId.slice(0, 8) : "--------");
     const threadStatusLabel = $derived.by(() => {
@@ -93,6 +98,14 @@
         } else if ((messages.turnStatus ?? "").toLowerCase() !== "inprogress") {
             turnStartTime = undefined;
         }
+    });
+
+    $effect(() => {
+        if (!threadId || socket.status !== "connected") return;
+        void artifactsStore.requestThread(
+            threadId,
+            auth.isLocalMode ? undefined : anchors.selectedId ?? undefined,
+        );
     });
 
     let sendError = $state<string | null>(null);
@@ -265,6 +278,14 @@
         handleSubmit("Approved. Proceed with implementation.");
     }
 
+    function refreshArtifacts() {
+        if (!threadId) return;
+        void artifactsStore.requestThread(
+            threadId,
+            auth.isLocalMode ? undefined : anchors.selectedId ?? undefined,
+        );
+    }
+
     const lastPlanId = $derived.by(() => {
         const msgs = messages.current;
         for (let i = msgs.length - 1; i >= 0; i--) {
@@ -431,6 +452,14 @@
                     />
                 </div>
             </section>
+
+            <ArtifactsTimeline
+                {threadId}
+                artifacts={threadArtifacts}
+                loading={artifactsLoading}
+                error={artifactsError}
+                onRefresh={refreshArtifacts}
+            />
         </section>
     </main>
 </div>
@@ -533,6 +562,10 @@
         background: color-mix(in srgb, var(--cli-bg-elevated) 90%, transparent);
         overflow: hidden;
         min-height: min(68vh, 900px);
+    }
+
+    .thread-shell :global(.artifacts-panel) {
+        margin-top: var(--space-sm);
     }
 
     :global(:root[data-theme="light"]) .thread-console {

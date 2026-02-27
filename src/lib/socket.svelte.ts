@@ -4,6 +4,12 @@ import type {
   GitWorktreeCreateParams,
   GitWorktreeCreateResult,
   GitWorktreeListResult,
+  OrbitArtifactsListResult,
+  OrbitMultiDispatchPayload,
+  ReleaseInspectResult,
+  ReleaseStartParams,
+  ReleaseStartResult,
+  ReleaseStatusResult,
   RpcMessage,
 } from "./types";
 const HEARTBEAT_INTERVAL = 30_000;
@@ -186,14 +192,8 @@ class SocketStore {
 
         // Handle orbit protocol messages
         if (typeof msg.type === "string" && msg.type.startsWith("orbit.")) {
-          if (
-            msg.type === "orbit.anchors" ||
-            msg.type === "orbit.anchor-connected" ||
-            msg.type === "orbit.anchor-disconnected"
-          ) {
-            for (const handler of this.#protocolHandlers) {
-              handler(msg);
-            }
+          for (const handler of this.#protocolHandlers) {
+            handler(msg);
           }
           return;
         }
@@ -260,6 +260,25 @@ class SocketStore {
 
   requestAnchors(): SendResult {
     return this.#sendRaw({ type: "orbit.list-anchors" });
+  }
+
+  artifactsList(threadId: string, anchorId?: string): Promise<OrbitArtifactsListResult> {
+    return this.#requestRpc<OrbitArtifactsListResult>(
+      "orbit.artifacts.list",
+      {
+        threadId,
+        ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+      },
+      "orbit-artifacts-list",
+    );
+  }
+
+  multiDispatch(payload: OrbitMultiDispatchPayload): Promise<Record<string, unknown>> {
+    return this.#requestRpc<Record<string, unknown>>(
+      "orbit.multi-dispatch",
+      payload as unknown as Record<string, unknown>,
+      "orbit-multi-dispatch",
+    );
   }
 
   listDirs(path?: string, startPath?: string): Promise<ListDirsResult> {
@@ -367,6 +386,44 @@ class SocketStore {
     this.#connect(this.#url);
   }
 
+  releaseInspect(params?: { repoPath?: string; targetRef?: string; tag?: string; anchorId?: string }): Promise<ReleaseInspectResult> {
+    return this.#requestRpc<ReleaseInspectResult>(
+      "anchor.release.inspect",
+      {
+        ...(params?.repoPath?.trim() ? { repoPath: params.repoPath.trim() } : {}),
+        ...(params?.targetRef?.trim() ? { targetRef: params.targetRef.trim() } : {}),
+        ...(params?.tag?.trim() ? { tag: params.tag.trim() } : {}),
+        ...(params?.anchorId?.trim() ? { anchorId: params.anchorId.trim() } : {}),
+      },
+      "release-inspect",
+    );
+  }
+
+  releaseStart(params: ReleaseStartParams): Promise<ReleaseStartResult> {
+    return this.#requestRpc<ReleaseStartResult>(
+      "anchor.release.start",
+      {
+        ...(params.repoPath?.trim() ? { repoPath: params.repoPath.trim() } : {}),
+        ...(params.targetRef?.trim() ? { targetRef: params.targetRef.trim() } : {}),
+        ...(params.tag?.trim() ? { tag: params.tag.trim() } : {}),
+        ...(typeof params.dryRun === "boolean" ? { dryRun: params.dryRun } : {}),
+        ...(params.anchorId?.trim() ? { anchorId: params.anchorId.trim() } : {}),
+      },
+      "release-start",
+    );
+  }
+
+  releaseStatus(releaseId: string, anchorId?: string): Promise<ReleaseStatusResult> {
+    return this.#requestRpc<ReleaseStatusResult>(
+      "anchor.release.status",
+      {
+        releaseId,
+        ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+      },
+      "release-status",
+    );
+  }
+
   readCodexConfig(path?: string, anchorId?: string): Promise<CodexConfigReadResult> {
     const id = `codex-config-read-${++this.#rpcIdCounter}`;
     return new Promise((resolve, reject) => {
@@ -447,6 +504,21 @@ class SocketStore {
   unsubscribeThread(threadId: string): SendResult {
     this.#subscribedThreads.delete(threadId);
     return this.#sendRaw({ type: "orbit.unsubscribe", threadId });
+  }
+
+  #requestRpc<T>(method: string, params: Record<string, unknown>, idPrefix: string): Promise<T> {
+    const id = `${idPrefix}-${++this.#rpcIdCounter}`;
+    return new Promise((resolve, reject) => {
+      this.#pendingRpc.set(id, {
+        resolve: (value) => resolve(value as T),
+        reject,
+      });
+      const result = this.send({ id, method, params });
+      if (!result.success) {
+        this.#pendingRpc.delete(id);
+        reject(new Error(result.error ?? "Not connected"));
+      }
+    });
   }
 
   #sendRaw(message: Record<string, unknown>): SendResult {

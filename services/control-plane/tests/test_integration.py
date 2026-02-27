@@ -393,6 +393,208 @@ def test_anchor_reconnect_after_disconnect(tmp_path: Path, monkeypatch) -> None:
             assert hello["role"] == "anchor"
 
 
+def test_relay_replays_state_and_recent_messages_on_client_resubscribe(tmp_path: Path, monkeypatch) -> None:
+    client = _make_client(tmp_path, monkeypatch, auth_mode="basic")
+    with client:
+        username = f"user-{uuid.uuid4().hex[:8]}"
+        registered = _register_basic(client, username)
+        anchor_tokens = _issue_anchor_tokens(client, registered["token"])
+        anchor_access = anchor_tokens["anchorAccessToken"]
+
+        with client.websocket_connect(f"/ws/anchor?token={anchor_access}") as anchor_ws:
+            assert anchor_ws.receive_json()["type"] == "orbit.hello"
+            anchor_ws.send_json({"type": "anchor.hello", "hostname": "replay-anchor", "platform": "linux", "anchorId": "replay-anchor"})
+            anchor_ws.send_json({"type": "orbit.subscribe", "threadId": "thread-replay"})
+            _recv_until(anchor_ws, lambda msg: msg.get("type") == "orbit.subscribed" and msg.get("threadId") == "thread-replay")
+
+            with client.websocket_connect(f"/ws/client?token={registered['token']}&clientId=replay-client-a") as client_a_ws:
+                _recv_until(client_a_ws, lambda msg: msg.get("type") == "orbit.hello")
+                client_a_ws.send_json({"type": "orbit.subscribe", "threadId": "thread-replay"})
+                _recv_until(client_a_ws, lambda msg: msg.get("type") == "orbit.subscribed" and msg.get("threadId") == "thread-replay")
+                _recv_until(client_a_ws, lambda msg: msg.get("type") == "orbit.relay-state" and msg.get("threadId") == "thread-replay")
+
+                anchor_ws.send_json(
+                    {
+                        "method": "turn/started",
+                        "params": {"threadId": "thread-replay", "turn": {"id": "turn-replay-1", "status": "InProgress"}},
+                    }
+                )
+                _recv_until(
+                    client_a_ws,
+                    lambda msg: msg.get("method") == "turn/started" and msg.get("params", {}).get("threadId") == "thread-replay",
+                )
+
+                anchor_ws.send_json(
+                    {
+                        "method": "item/agentMessage/delta",
+                        "params": {"threadId": "thread-replay", "itemId": "agent-1", "delta": "hello replay"},
+                    }
+                )
+                _recv_until(
+                    client_a_ws,
+                    lambda msg: msg.get("method") == "item/agentMessage/delta"
+                    and msg.get("params", {}).get("threadId") == "thread-replay",
+                )
+
+            with client.websocket_connect(f"/ws/client?token={registered['token']}&clientId=replay-client-b") as client_b_ws:
+                _recv_until(client_b_ws, lambda msg: msg.get("type") == "orbit.hello")
+                client_b_ws.send_json({"type": "orbit.subscribe", "threadId": "thread-replay"})
+                _recv_until(client_b_ws, lambda msg: msg.get("type") == "orbit.subscribed" and msg.get("threadId") == "thread-replay")
+
+                replay_state = _recv_until(
+                    client_b_ws,
+                    lambda msg: msg.get("type") == "orbit.relay-state" and msg.get("threadId") == "thread-replay",
+                )
+                assert replay_state.get("boundAnchorId") == "replay-anchor"
+                assert replay_state.get("turn", {}).get("id") == "turn-replay-1"
+                assert replay_state.get("replayed", 0) >= 2
+
+                replayed_turn = _recv_until(
+                    client_b_ws,
+                    lambda msg: msg.get("method") == "turn/started" and msg.get("params", {}).get("threadId") == "thread-replay",
+                )
+                assert replayed_turn.get("params", {}).get("turn", {}).get("id") == "turn-replay-1"
+
+                replayed_delta = _recv_until(
+                    client_b_ws,
+                    lambda msg: msg.get("method") == "item/agentMessage/delta"
+                    and msg.get("params", {}).get("threadId") == "thread-replay",
+                )
+                assert replayed_delta.get("params", {}).get("delta") == "hello replay"
+
+
+def test_relay_artifacts_list_via_ws_and_http(tmp_path: Path, monkeypatch) -> None:
+    client = _make_client(tmp_path, monkeypatch, auth_mode="basic")
+    with client:
+        username = f"user-{uuid.uuid4().hex[:8]}"
+        registered = _register_basic(client, username)
+        anchor_tokens = _issue_anchor_tokens(client, registered["token"])
+        anchor_access = anchor_tokens["anchorAccessToken"]
+
+        with client.websocket_connect(f"/ws/anchor?token={anchor_access}") as anchor_ws:
+            assert anchor_ws.receive_json()["type"] == "orbit.hello"
+            anchor_ws.send_json({"type": "anchor.hello", "hostname": "artifact-anchor", "platform": "linux", "anchorId": "artifact-anchor"})
+            anchor_ws.send_json({"type": "orbit.subscribe", "threadId": "thread-artifacts"})
+            _recv_until(
+                anchor_ws,
+                lambda msg: msg.get("type") == "orbit.subscribed" and msg.get("threadId") == "thread-artifacts",
+            )
+
+            with client.websocket_connect(f"/ws/client?token={registered['token']}&clientId=artifact-client") as client_ws:
+                _recv_until(client_ws, lambda msg: msg.get("type") == "orbit.hello")
+                client_ws.send_json({"type": "orbit.subscribe", "threadId": "thread-artifacts"})
+                _recv_until(
+                    client_ws,
+                    lambda msg: msg.get("type") == "orbit.subscribed" and msg.get("threadId") == "thread-artifacts",
+                )
+                _recv_until(
+                    client_ws,
+                    lambda msg: msg.get("type") == "orbit.relay-state" and msg.get("threadId") == "thread-artifacts",
+                )
+
+                anchor_ws.send_json(
+                    {
+                        "method": "turn/started",
+                        "params": {"threadId": "thread-artifacts", "turn": {"id": "turn-artifacts-1", "status": "InProgress"}},
+                    }
+                )
+                _recv_until(
+                    client_ws,
+                    lambda msg: msg.get("method") == "turn/started" and msg.get("params", {}).get("threadId") == "thread-artifacts",
+                )
+
+                anchor_ws.send_json(
+                    {
+                        "method": "item/completed",
+                        "params": {
+                            "threadId": "thread-artifacts",
+                            "turnId": "turn-artifacts-1",
+                            "item": {
+                                "id": "cmd-item-1",
+                                "type": "commandExecution",
+                                "command": "echo hi",
+                                "aggregatedOutput": "hi",
+                                "exitCode": 0,
+                            },
+                        },
+                    }
+                )
+                _recv_until(
+                    client_ws,
+                    lambda msg: msg.get("method") == "item/completed" and msg.get("params", {}).get("threadId") == "thread-artifacts",
+                )
+
+                client_ws.send_json(
+                    {"type": "orbit.artifacts.list", "requestId": "art-req-1", "threadId": "thread-artifacts", "limit": 10}
+                )
+                artifacts_msg = _recv_until(
+                    client_ws,
+                    lambda msg: msg.get("type") == "orbit.artifacts" and msg.get("requestId") == "art-req-1",
+                )
+                artifacts = artifacts_msg.get("artifacts") or []
+                assert len(artifacts) >= 1
+                assert artifacts[0].get("artifactType") == "command"
+                assert artifacts[0].get("itemId") == "cmd-item-1"
+
+                http_list = client.get(
+                    "/relay/artifacts",
+                    params={"threadId": "thread-artifacts", "limit": 10},
+                    headers={"authorization": f"Bearer {registered['token']}"},
+                )
+                assert http_list.status_code == 200, http_list.text
+                http_payload = http_list.json()
+                assert isinstance(http_payload.get("artifacts"), list)
+                assert any(item.get("itemId") == "cmd-item-1" for item in http_payload["artifacts"])
+
+
+def test_multi_dispatch_fans_out_and_aggregates_two_anchors(tmp_path: Path, monkeypatch) -> None:
+    client = _make_client(tmp_path, monkeypatch, auth_mode="basic")
+    with client:
+        username = f"user-{uuid.uuid4().hex[:8]}"
+        registered = _register_basic(client, username)
+        anchor_tokens = _issue_anchor_tokens(client, registered["token"])
+        anchor_access = anchor_tokens["anchorAccessToken"]
+
+        with client.websocket_connect(f"/ws/anchor?token={anchor_access}") as anchor_a_ws:
+            assert anchor_a_ws.receive_json()["type"] == "orbit.hello"
+            anchor_a_ws.send_json({"type": "anchor.hello", "hostname": "anchor-a", "platform": "linux", "anchorId": "anchor-a"})
+
+            with client.websocket_connect(f"/ws/anchor?token={anchor_access}") as anchor_b_ws:
+                assert anchor_b_ws.receive_json()["type"] == "orbit.hello"
+                anchor_b_ws.send_json({"type": "anchor.hello", "hostname": "anchor-b", "platform": "linux", "anchorId": "anchor-b"})
+
+                with client.websocket_connect(f"/ws/client?token={registered['token']}&clientId=multi-dispatch-client") as client_ws:
+                    _recv_until(client_ws, lambda msg: msg.get("type") == "orbit.hello")
+
+                    client_ws.send_json(
+                        {
+                            "type": "orbit.multi-dispatch",
+                            "requestId": "md-1",
+                            "anchorIds": ["anchor-a", "anchor-b"],
+                            "request": {"id": 77, "method": "anchor.echo", "params": {"value": "ping"}},
+                        }
+                    )
+
+                    request_a = _recv_until(anchor_a_ws, lambda msg: msg.get("method") == "anchor.echo")
+                    request_b = _recv_until(anchor_b_ws, lambda msg: msg.get("method") == "anchor.echo")
+                    assert request_a.get("id") != request_b.get("id")
+
+                    anchor_a_ws.send_json({"id": request_a["id"], "result": {"anchor": "anchor-a", "ok": True}})
+                    anchor_b_ws.send_json({"id": request_b["id"], "result": {"anchor": "anchor-b", "ok": True}})
+
+                    aggregate = _recv_until(
+                        client_ws,
+                        lambda msg: msg.get("type") == "orbit.multi-dispatch.result" and msg.get("requestId") == "md-1",
+                    )
+                    results = aggregate.get("results") or []
+                    assert len(results) == 2
+                    by_anchor = {entry.get("anchorId"): entry for entry in results}
+                    assert by_anchor["anchor-a"].get("ok") is True
+                    assert by_anchor["anchor-b"].get("ok") is True
+                    assert by_anchor["anchor-a"].get("response", {}).get("result", {}).get("anchor") == "anchor-a"
+                    assert by_anchor["anchor-b"].get("response", {}).get("result", {}).get("anchor") == "anchor-b"
+
+
 def test_passkey_mode_register_options_origin_checks(tmp_path: Path, monkeypatch) -> None:
     client = _make_client(
         tmp_path,

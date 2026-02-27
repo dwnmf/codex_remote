@@ -6,7 +6,9 @@
   import { socket } from "../lib/socket.svelte";
   import AppHeader from "../lib/components/AppHeader.svelte";
   import NotificationSettings from "../lib/components/NotificationSettings.svelte";
+  import ReleaseCockpit from "../lib/components/ReleaseCockpit.svelte";
   import { anchors } from "../lib/anchors.svelte";
+  import { releaseCockpit } from "../lib/release-cockpit.svelte";
 
   const themeIcons = { system: "◐", light: "○", dark: "●" } as const;
 
@@ -28,6 +30,7 @@
   const canConnect = $derived(socket.status === "disconnected" || socket.status === "error");
   const isSocketConnected = $derived(socket.status === "connected");
   const canManageCodexConfig = $derived(auth.isLocalMode || Boolean(selectedAnchorId));
+  const canManageRelease = $derived(auth.isLocalMode || Boolean(selectedAnchorId));
   const connectionActionLabel = $derived.by(() => {
     if (socket.status === "connecting") return "Cancel";
     if (socket.status === "reconnecting") return "Stop reconnect";
@@ -68,6 +71,12 @@
   }
 
   function resolveAnchorIdForConfig(): string | undefined {
+    if (auth.isLocalMode) return undefined;
+    const candidate = selectedAnchorId?.trim();
+    return candidate ? candidate : undefined;
+  }
+
+  function resolveAnchorIdForRelease(): string | undefined {
     if (auth.isLocalMode) return undefined;
     const candidate = selectedAnchorId?.trim();
     return candidate ? candidate : undefined;
@@ -162,6 +171,34 @@
     if (codexConfigDirty) return;
     void loadCodexConfig(undefined, true);
   });
+
+  $effect(() => {
+    if (!isSocketConnected || !canManageRelease) {
+      releaseCockpit.stopPolling();
+    }
+  });
+
+  function inspectRelease(params: { repoPath?: string; targetRef?: string; tag?: string }) {
+    void releaseCockpit.inspectRelease({
+      ...params,
+      ...(resolveAnchorIdForRelease() ? { anchorId: resolveAnchorIdForRelease() } : {}),
+    });
+  }
+
+  function startRelease(params: { repoPath?: string; targetRef?: string; tag?: string; dryRun?: boolean }) {
+    void releaseCockpit.startRelease({
+      ...params,
+      ...(resolveAnchorIdForRelease() ? { anchorId: resolveAnchorIdForRelease() } : {}),
+    });
+  }
+
+  function pollReleaseStatus() {
+    void releaseCockpit.pollStatus(resolveAnchorIdForRelease());
+  }
+
+  function startReleasePolling() {
+    releaseCockpit.startPolling(resolveAnchorIdForRelease());
+  }
 
 </script>
 
@@ -363,10 +400,28 @@
 
     <NotificationSettings />
 
+    <ReleaseCockpit
+      connected={isSocketConnected}
+      canManage={canManageRelease}
+      inspect={releaseCockpit.inspect}
+      status={releaseCockpit.status}
+      inspectLoading={releaseCockpit.inspectLoading}
+      startLoading={releaseCockpit.startLoading}
+      statusLoading={releaseCockpit.statusLoading}
+      polling={releaseCockpit.polling}
+      error={releaseCockpit.error}
+      info={releaseCockpit.info}
+      onInspect={inspectRelease}
+      onStart={startRelease}
+      onPoll={pollReleaseStatus}
+      onStartPolling={startReleasePolling}
+      onStopPolling={() => releaseCockpit.stopPolling()}
+    />
+
     {#if !auth.isLocalMode}
       <div class="section stack">
         <div class="section-header">
-          <span class="section-index">05</span>
+          <span class="section-index">06</span>
           <span class="section-title">Account</span>
         </div>
         <div class="section-body stack">

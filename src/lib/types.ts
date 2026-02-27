@@ -222,3 +222,90 @@ export interface GitWorktreeCreateResult {
   branch: string;
   head: string;
 }
+
+export interface OrbitArtifactLink {
+  label: string;
+  href: string;
+}
+
+export interface OrbitArtifact {
+  id: string;
+  threadId: string;
+  type: string;
+  title: string;
+  summary?: string;
+  createdAt: string;
+  status?: string;
+  links?: OrbitArtifactLink[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface OrbitArtifactsListResult {
+  artifacts: OrbitArtifact[];
+}
+
+export interface OrbitMultiDispatchPayload {
+  channel: string;
+  threadId?: string;
+  releaseId?: string;
+  event?: string;
+  data: Record<string, unknown>;
+}
+
+export type ReleaseCheckStatus = "pass" | "warn" | "fail" | "unknown";
+
+export interface ReleaseCheck {
+  id: string;
+  label: string;
+  status: ReleaseCheckStatus;
+  detail?: string;
+}
+
+export interface ReleaseInspectResult {
+  ready: boolean;
+  repoPath?: string;
+  branch?: string | null;
+  checks: ReleaseCheck[];
+  notes: string[];
+}
+
+export interface ReleaseStartParams {
+  repoPath?: string;
+  targetRef?: string;
+  tag?: string;
+  dryRun?: boolean;
+  anchorId?: string;
+}
+
+export interface ReleaseStartResult {
+  releaseId: string;
+  status: string;
+  message?: string;
+}
+
+export interface ReleaseLogEntry {
+  id: string;
+  ts: string;
+  level: string;
+  message: string;
+}
+
+export interface ReleaseAsset {
+  id: string;
+  label: string;
+  href?: string;
+  path?: string;
+  kind?: string;
+}
+
+export interface ReleaseStatusResult {
+  releaseId: string;
+  status: string;
+  phase?: string;
+  logs: ReleaseLogEntry[];
+  assets: ReleaseAsset[];
+  links: ReleaseAsset[];
+  error?: string;
+  updatedAt?: string;
+  completedAt?: string;
+}
