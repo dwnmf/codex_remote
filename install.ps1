@@ -123,6 +123,71 @@ function Ensure-Path([string]$TargetDir) {
   }
 }
 
+function Ensure-BunInstalled() {
+  if (Test-Tool "bun") {
+    $bunVersion = & bun --version
+    Write-Pass "bun $bunVersion"
+    return
+  }
+
+  Write-WarnLine "bun not found. Installing via bun.sh..."
+  $bunInstallCommand = 'irm bun.sh/install.ps1|iex'
+  & powershell -NoProfile -ExecutionPolicy Bypass -Command $bunInstallCommand
+  if ($LASTEXITCODE -ne 0) {
+    Abort "Failed to install bun via bun.sh installer."
+  }
+
+  foreach ($candidate in @((Join-Path $HOME ".bun\bin"), (Join-Path $env:USERPROFILE ".bun\bin"))) {
+    if ($candidate -and (Test-Path $candidate)) {
+      Ensure-Path $candidate
+    }
+  }
+
+  if (-not (Test-Tool "bun")) {
+    Abort "bun installation completed but 'bun' is still not available in PATH."
+  }
+
+  $bunVersion = & bun --version
+  Write-Pass "bun $bunVersion"
+}
+
+function Ensure-OpenSslInstalled() {
+  $opensslBin = "C:\Program Files\OpenSSL-Win64\bin"
+  if (Test-Tool "openssl") {
+    Write-Pass "openssl installed"
+    if (Test-Path $opensslBin) {
+      Ensure-Path $opensslBin
+    }
+    return
+  }
+
+  Write-WarnLine "openssl not found. Installing OpenSSL Light..."
+  $url = "https://slproweb.com/download/Win64OpenSSL_Light-3_6_1.exe"
+  $tmpExe = Join-Path $env:TEMP "Win64OpenSSL_Light-3_6_1.exe"
+  try {
+    Invoke-WebRequest -Uri $url -OutFile $tmpExe
+    $proc = Start-Process -FilePath $tmpExe -ArgumentList "/verysilent", "/silent", "/sp-", "/norestart" -Wait -PassThru
+    if ($proc.ExitCode -ne 0) {
+      Abort "OpenSSL installer exited with code $($proc.ExitCode)."
+    }
+  }
+  finally {
+    if (Test-Path $tmpExe) {
+      Remove-Item $tmpExe -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  if (Test-Path $opensslBin) {
+    Ensure-Path $opensslBin
+  }
+
+  if (-not (Test-Tool "openssl")) {
+    Abort "OpenSSL installation completed but 'openssl' is still not available in PATH."
+  }
+
+  Write-Pass "openssl installed"
+}
+
 function Ensure-CommandViaWinget([string]$CommandName, [string]$WingetId, [string]$ManualHint) {
   if (Test-Tool $CommandName) {
     return
@@ -318,6 +383,9 @@ else {
   Write-WarnLine "winget not found (installer will not auto-install missing tools)."
 }
 
+Ensure-BunInstalled
+Ensure-OpenSslInstalled
+
 $hasGit = Test-Tool "git"
 $hasBun = Test-Tool "bun"
 $selectedMode = switch ($InstallMode) {
@@ -332,10 +400,6 @@ if ($selectedMode -eq "source") {
   if ($hasGit) {
     Write-Pass "git installed"
   }
-  if ($hasBun) {
-    $bunVersion = & bun --version
-    Write-Pass "bun $bunVersion"
-  }
 }
 else {
   if ($hasGit) {
@@ -345,13 +409,7 @@ else {
     Write-Host "  git not required in release mode"
   }
 
-  if ($hasBun) {
-    $bunVersion = & bun --version
-    Write-Pass "bun $bunVersion (optional in release mode)"
-  }
-  else {
-    Write-Host "  bun not required in release mode"
-  }
+  Write-Pass "bun installed (optional in release mode)"
 }
 
 Ensure-CommandViaWinget "codex" "OpenAI.Codex" "Install manually: https://github.com/openai/codex"
