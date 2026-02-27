@@ -18,6 +18,16 @@ describe("message limits", () => {
     expect(afterCap).toBe(next);
   });
 
+  test("appendDeltaWithCap handles snapshot chunks without duplication", () => {
+    expect(appendDeltaWithCap("Го", "Готово")).toBe("Готово");
+    expect(appendDeltaWithCap("abc", "abc")).toBe("abc");
+  });
+
+  test("appendDeltaWithCap merges overlapping chunks once", () => {
+    expect(appendDeltaWithCap("Hello world", "world!")).toBe("Hello world!");
+    expect(appendDeltaWithCap("artifact.txt", "txt created")).toBe("artifact.txt created");
+  });
+
   test("keepRecentMessages returns latest entries only", () => {
     const messages: Message[] = Array.from({ length: 6 }).map((_, index) => ({
       id: `m-${index}`,
@@ -30,4 +40,3 @@ describe("message limits", () => {
     expect(recent.map((message) => message.id)).toEqual(["m-3", "m-4", "m-5"]);
   });
 });
-
