@@ -69,10 +69,10 @@ function Ensure-EnvFile([string]$HomePath) {
     return
   }
 
-  $exampleCandidates = @(
-    (Join-Path $HomePath ".env.example"),
-    (Join-Path $PSScriptRoot ".env.example")
-  )
+  $exampleCandidates = @((Join-Path $HomePath ".env.example"))
+  if ($PSScriptRoot) {
+    $exampleCandidates += (Join-Path $PSScriptRoot ".env.example")
+  }
   foreach ($example in $exampleCandidates) {
     if (Test-Path $example) {
       Copy-Item $example $envFile -Force
