@@ -97,22 +97,49 @@ describe("socket rpc helpers", () => {
     expect(request.params.threadId).toBe("thread-1");
 
     ws.emitMessage({
-      id: request.id,
-      result: {
-        artifacts: [
-          {
-            id: "artifact-1",
-            threadId: "thread-1",
-            type: "bundle",
-            title: "Build",
-            createdAt: "2026-01-01T00:00:00.000Z",
-          },
-        ],
-      },
+      type: "orbit.artifacts",
+      requestId: request.id,
+      artifacts: [
+        {
+          id: "artifact-1",
+          threadId: "thread-1",
+          type: "bundle",
+          title: "Build",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
     });
 
     const result = await promise;
     expect(result.artifacts[0].id).toBe("artifact-1");
+    socket.disconnect();
+  });
+
+  test("resolves orbit RPC responses by requestId payloads", async () => {
+    const { socket } = await loadFreshSocketModule();
+    socket.connect("ws://localhost:8788/ws/client");
+    const ws = FakeWebSocket.instances[0];
+    ws.open();
+
+    const promise = socket.artifactsList("thread-2");
+    const request = JSON.parse(ws.sent[0]) as { id: string };
+
+    ws.emitMessage({
+      type: "orbit.artifacts",
+      requestId: request.id,
+      artifacts: [
+        {
+          id: "artifact-2",
+          threadId: "thread-2",
+          type: "file",
+          title: "Patch",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const result = await promise;
+    expect(result.artifacts[0].id).toBe("artifact-2");
     socket.disconnect();
   });
 

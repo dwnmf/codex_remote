@@ -2,6 +2,7 @@
   import { socket } from "../lib/socket.svelte";
   import { threads } from "../lib/threads.svelte";
   import { messages } from "../lib/messages.svelte";
+  import { navigate } from "../router";
   import { theme } from "../lib/theme.svelte";
   import { models } from "../lib/models.svelte";
   import { anchors } from "../lib/anchors.svelte";
@@ -639,7 +640,15 @@
                           Stop
                         </button>
                       {/if}
-                      <a href={"/thread/" + pane.threadId}>Open</a>
+                      <a
+                        href={"/thread/" + pane.threadId}
+                        onclick={(event) => {
+                          event.preventDefault();
+                          if (pane.threadId) {
+                            navigate("/thread/:id", { params: { id: pane.threadId } });
+                          }
+                        }}
+                      >Open</a>
                     </div>
                   </div>
                   <div class="pane-terminal-body">

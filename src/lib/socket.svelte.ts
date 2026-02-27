@@ -15,6 +15,7 @@ import type {
 const HEARTBEAT_INTERVAL = 30_000;
 const HEARTBEAT_TIMEOUT = 10_000;
 const RECONNECT_DELAY = 2_000;
+const RPC_TIMEOUT = 30_000;
 const CLIENT_ID_KEY = "__codex_remote_client_id__";
 const LOCAL_MODE_TOKEN = "local-mode";
 
@@ -79,6 +80,12 @@ export interface AnchorImageReadResult {
   bytes: number;
 }
 
+interface PendingRpcEntry {
+  resolve: (v: unknown) => void;
+  reject: (e: Error) => void;
+  timeout: ReturnType<typeof setTimeout> | null;
+}
+
 class SocketStore {
   status = $state<ConnectionStatus>("disconnected");
   error = $state<string | null>(null);
@@ -95,7 +102,7 @@ class SocketStore {
   #intentionalDisconnect = false;
   #subscribedThreads = new Set<string>();
   #rpcIdCounter = 0;
-  #pendingRpc = new Map<number | string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  #pendingRpc = new Map<number | string, PendingRpcEntry>();
 
   get url() {
     return this.#url;
@@ -190,24 +197,28 @@ class SocketStore {
           return;
         }
 
+        const rpcKey = this.#extractRpcResponseKey(msg);
+        if (rpcKey != null) {
+          const pending = this.#consumePendingRpc(rpcKey);
+          if (pending) {
+            if (msg.error) {
+              const errObj = msg.error as Record<string, unknown>;
+              const errorMessage =
+                typeof errObj.message === "string" && errObj.message.trim()
+                  ? errObj.message
+                  : "RPC error";
+              pending.reject(new Error(errorMessage));
+            } else {
+              pending.resolve(msg.result !== undefined ? msg.result : msg);
+            }
+            return;
+          }
+        }
+
         // Handle orbit protocol messages
         if (typeof msg.type === "string" && msg.type.startsWith("orbit.")) {
           for (const handler of this.#protocolHandlers) {
             handler(msg);
-          }
-          return;
-        }
-
-        // Resolve pending RPC responses (anchor.listDirs etc.)
-        const rpcId = msg.id as number | string | undefined;
-        if (rpcId != null && this.#pendingRpc.has(rpcId)) {
-          const { resolve, reject } = this.#pendingRpc.get(rpcId)!;
-          this.#pendingRpc.delete(rpcId);
-          if (msg.error) {
-            const errObj = msg.error as Record<string, unknown>;
-            reject(new Error(typeof errObj.message === "string" ? errObj.message : "RPC error"));
-          } else {
-            resolve(msg.result);
           }
           return;
         }
@@ -282,101 +293,51 @@ class SocketStore {
   }
 
   listDirs(path?: string, startPath?: string): Promise<ListDirsResult> {
-    const id = `dir-${++this.#rpcIdCounter}`;
-    return new Promise((resolve, reject) => {
-      this.#pendingRpc.set(id, {
-        resolve: (v) => resolve(v as ListDirsResult),
-        reject,
-      });
-      const result = this.send({ id, method: "anchor.listDirs", params: { path: path ?? "", startPath: startPath ?? "" } });
-      if (!result.success) {
-        this.#pendingRpc.delete(id);
-        reject(new Error(result.error ?? "Not connected"));
-      }
-    });
+    return this.#requestRpc<ListDirsResult>(
+      "anchor.listDirs",
+      { path: path ?? "", startPath: startPath ?? "" },
+      "dir",
+    );
   }
 
   gitInspect(path: string): Promise<GitInspectResult> {
-    const id = `git-inspect-${++this.#rpcIdCounter}`;
-    return new Promise((resolve, reject) => {
-      this.#pendingRpc.set(id, {
-        resolve: (v) => resolve(v as GitInspectResult),
-        reject,
-      });
-      const result = this.send({ id, method: "anchor.git.inspect", params: { path } });
-      if (!result.success) {
-        this.#pendingRpc.delete(id);
-        reject(new Error(result.error ?? "Not connected"));
-      }
-    });
+    return this.#requestRpc<GitInspectResult>(
+      "anchor.git.inspect",
+      { path },
+      "git-inspect",
+    );
   }
 
   gitWorktreeList(repoRoot: string): Promise<GitWorktreeListResult> {
-    const id = `git-worktree-list-${++this.#rpcIdCounter}`;
-    return new Promise((resolve, reject) => {
-      this.#pendingRpc.set(id, {
-        resolve: (v) => resolve(v as GitWorktreeListResult),
-        reject,
-      });
-      const result = this.send({ id, method: "anchor.git.worktree.list", params: { repoRoot } });
-      if (!result.success) {
-        this.#pendingRpc.delete(id);
-        reject(new Error(result.error ?? "Not connected"));
-      }
-    });
+    return this.#requestRpc<GitWorktreeListResult>(
+      "anchor.git.worktree.list",
+      { repoRoot },
+      "git-worktree-list",
+    );
   }
 
   gitWorktreeCreate(params: GitWorktreeCreateParams): Promise<GitWorktreeCreateResult> {
-    const id = `git-worktree-create-${++this.#rpcIdCounter}`;
-    return new Promise((resolve, reject) => {
-      this.#pendingRpc.set(id, {
-        resolve: (v) => resolve(v as GitWorktreeCreateResult),
-        reject,
-      });
-      const result = this.send({
-        id,
-        method: "anchor.git.worktree.create",
-        params: params as unknown as Record<string, unknown>,
-      });
-      if (!result.success) {
-        this.#pendingRpc.delete(id);
-        reject(new Error(result.error ?? "Not connected"));
-      }
-    });
+    return this.#requestRpc<GitWorktreeCreateResult>(
+      "anchor.git.worktree.create",
+      params as unknown as Record<string, unknown>,
+      "git-worktree-create",
+    );
   }
 
   gitWorktreeRemove(repoRoot: string, path: string, force = false): Promise<GitWorktreeRemoveResult> {
-    const id = `git-worktree-remove-${++this.#rpcIdCounter}`;
-    return new Promise((resolve, reject) => {
-      this.#pendingRpc.set(id, {
-        resolve: (v) => resolve(v as GitWorktreeRemoveResult),
-        reject,
-      });
-      const result = this.send({
-        id,
-        method: "anchor.git.worktree.remove",
-        params: { repoRoot, path, force },
-      });
-      if (!result.success) {
-        this.#pendingRpc.delete(id);
-        reject(new Error(result.error ?? "Not connected"));
-      }
-    });
+    return this.#requestRpc<GitWorktreeRemoveResult>(
+      "anchor.git.worktree.remove",
+      { repoRoot, path, force },
+      "git-worktree-remove",
+    );
   }
 
   gitWorktreePrune(repoRoot: string): Promise<GitWorktreePruneResult> {
-    const id = `git-worktree-prune-${++this.#rpcIdCounter}`;
-    return new Promise((resolve, reject) => {
-      this.#pendingRpc.set(id, {
-        resolve: (v) => resolve(v as GitWorktreePruneResult),
-        reject,
-      });
-      const result = this.send({ id, method: "anchor.git.worktree.prune", params: { repoRoot } });
-      if (!result.success) {
-        this.#pendingRpc.delete(id);
-        reject(new Error(result.error ?? "Not connected"));
-      }
-    });
+    return this.#requestRpc<GitWorktreePruneResult>(
+      "anchor.git.worktree.prune",
+      { repoRoot },
+      "git-worktree-prune",
+    );
   }
 
   reconnect() {
@@ -425,48 +386,26 @@ class SocketStore {
   }
 
   readCodexConfig(path?: string, anchorId?: string): Promise<CodexConfigReadResult> {
-    const id = `codex-config-read-${++this.#rpcIdCounter}`;
-    return new Promise((resolve, reject) => {
-      this.#pendingRpc.set(id, {
-        resolve: (v) => resolve(v as CodexConfigReadResult),
-        reject,
-      });
-      const result = this.send({
-        id,
-        method: "anchor.config.read",
-        params: {
-          ...(path?.trim() ? { path: path.trim() } : {}),
-          ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
-        },
-      });
-      if (!result.success) {
-        this.#pendingRpc.delete(id);
-        reject(new Error(result.error ?? "Not connected"));
-      }
-    });
+    return this.#requestRpc<CodexConfigReadResult>(
+      "anchor.config.read",
+      {
+        ...(path?.trim() ? { path: path.trim() } : {}),
+        ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+      },
+      "codex-config-read",
+    );
   }
 
   writeCodexConfig(content: string, path?: string, anchorId?: string): Promise<CodexConfigWriteResult> {
-    const id = `codex-config-write-${++this.#rpcIdCounter}`;
-    return new Promise((resolve, reject) => {
-      this.#pendingRpc.set(id, {
-        resolve: (v) => resolve(v as CodexConfigWriteResult),
-        reject,
-      });
-      const result = this.send({
-        id,
-        method: "anchor.config.write",
-        params: {
-          content,
-          ...(path?.trim() ? { path: path.trim() } : {}),
-          ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
-        },
-      });
-      if (!result.success) {
-        this.#pendingRpc.delete(id);
-        reject(new Error(result.error ?? "Not connected"));
-      }
-    });
+    return this.#requestRpc<CodexConfigWriteResult>(
+      "anchor.config.write",
+      {
+        content,
+        ...(path?.trim() ? { path: path.trim() } : {}),
+        ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+      },
+      "codex-config-write",
+    );
   }
 
   readImageAsset(path: string, anchorId?: string): Promise<AnchorImageReadResult> {
@@ -475,25 +414,14 @@ class SocketStore {
       return Promise.reject(new Error("path is required"));
     }
 
-    const id = `anchor-image-read-${++this.#rpcIdCounter}`;
-    return new Promise((resolve, reject) => {
-      this.#pendingRpc.set(id, {
-        resolve: (v) => resolve(v as AnchorImageReadResult),
-        reject,
-      });
-      const result = this.send({
-        id,
-        method: "anchor.image.read",
-        params: {
-          path: normalizedPath,
-          ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
-        },
-      });
-      if (!result.success) {
-        this.#pendingRpc.delete(id);
-        reject(new Error(result.error ?? "Not connected"));
-      }
-    });
+    return this.#requestRpc<AnchorImageReadResult>(
+      "anchor.image.read",
+      {
+        path: normalizedPath,
+        ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+      },
+      "anchor-image-read",
+    );
   }
 
   subscribeThread(threadId: string): SendResult {
@@ -509,16 +437,52 @@ class SocketStore {
   #requestRpc<T>(method: string, params: Record<string, unknown>, idPrefix: string): Promise<T> {
     const id = `${idPrefix}-${++this.#rpcIdCounter}`;
     return new Promise((resolve, reject) => {
-      this.#pendingRpc.set(id, {
+      this.#registerPendingRpc(id, {
         resolve: (value) => resolve(value as T),
         reject,
       });
       const result = this.send({ id, method, params });
       if (!result.success) {
-        this.#pendingRpc.delete(id);
+        this.#consumePendingRpc(id);
         reject(new Error(result.error ?? "Not connected"));
       }
     });
+  }
+
+  #registerPendingRpc(id: number | string, handlers: { resolve: (v: unknown) => void; reject: (e: Error) => void }) {
+    const timeout = setTimeout(() => {
+      const pending = this.#consumePendingRpc(id);
+      if (!pending) return;
+      pending.reject(new Error("RPC timeout"));
+    }, RPC_TIMEOUT);
+
+    this.#pendingRpc.set(id, {
+      resolve: handlers.resolve,
+      reject: handlers.reject,
+      timeout,
+    });
+  }
+
+  #consumePendingRpc(id: number | string): PendingRpcEntry | null {
+    const pending = this.#pendingRpc.get(id) ?? null;
+    if (!pending) return null;
+    this.#pendingRpc.delete(id);
+    if (pending.timeout) {
+      clearTimeout(pending.timeout);
+      pending.timeout = null;
+    }
+    return pending;
+  }
+
+  #extractRpcResponseKey(message: Record<string, unknown>): string | number | null {
+    const id = message.id;
+    if (typeof id === "string" && id.trim()) return id;
+    if (typeof id === "number" && Number.isFinite(id)) return id;
+
+    const requestId = message.requestId ?? message.request_id;
+    if (typeof requestId === "string" && requestId.trim()) return requestId;
+    if (typeof requestId === "number" && Number.isFinite(requestId)) return requestId;
+    return null;
   }
 
   #sendRaw(message: Record<string, unknown>): SendResult {
@@ -592,10 +556,13 @@ class SocketStore {
   #cleanup() {
     this.#clearReconnectTimeout();
     this.#stopHeartbeat();
-    for (const [, { reject }] of this.#pendingRpc) {
-      reject(new Error("Connection closed"));
+    const pendingKeys = Array.from(this.#pendingRpc.keys());
+    for (const key of pendingKeys) {
+      const pending = this.#consumePendingRpc(key);
+      if (pending) {
+        pending.reject(new Error("Connection closed"));
+      }
     }
-    this.#pendingRpc.clear();
     if (this.#socket) {
       this.#socket.onopen = null;
       this.#socket.onclose = null;
