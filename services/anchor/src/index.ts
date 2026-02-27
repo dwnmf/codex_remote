@@ -53,12 +53,68 @@ interface CodexConfigResolution {
   candidates: string[];
 }
 
+function normalizeWindowsDriveRoot(raw: string): string {
+  const trimmed = raw.trim().replace(/\//g, "\\");
+  if (!trimmed) return "";
+  const withSlash = /^[a-zA-Z]:$/.test(trimmed) ? `${trimmed}\\` : trimmed;
+  if (!/^[a-zA-Z]:\\$/.test(withSlash)) return "";
+  return `${withSlash[0].toUpperCase()}:\\`;
+}
+
+async function queryWindowsRootsViaShell(): Promise<string[]> {
+  const commands: Array<string[]> = [
+    [
+      "powershell",
+      "-NoProfile",
+      "-Command",
+      "[System.IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name }",
+    ],
+    [
+      "pwsh",
+      "-NoProfile",
+      "-Command",
+      "[System.IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name }",
+    ],
+  ];
+
+  for (const cmd of commands) {
+    try {
+      const proc = Bun.spawn({
+        cmd,
+        stdout: "pipe",
+        stderr: "ignore",
+        stdin: "ignore",
+      });
+      const output = proc.stdout ? await new Response(proc.stdout).text() : "";
+      const exitCode = await proc.exited;
+      if (exitCode !== 0) continue;
+      const roots = output
+        .split(/\r?\n/)
+        .map((line) => normalizeWindowsDriveRoot(line))
+        .filter(Boolean);
+      if (roots.length > 0) {
+        return Array.from(new Set(roots)).sort((a, b) => a.localeCompare(b));
+      }
+    } catch {
+      // Try next shell command.
+    }
+  }
+
+  return [];
+}
+
 async function listFilesystemRoots(): Promise<string[]> {
   if (filesystemRootsCache) {
     return filesystemRootsCache;
   }
 
   if (process.platform === "win32") {
+    const shellRoots = await queryWindowsRootsViaShell();
+    if (shellRoots.length > 0) {
+      filesystemRootsCache = shellRoots;
+      return filesystemRootsCache;
+    }
+
     const roots: string[] = [];
     for (let code = 65; code <= 90; code += 1) {
       const drive = `${String.fromCharCode(code)}:\\`;
