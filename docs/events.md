@@ -27,12 +27,13 @@ These methods are handled by Anchor directly and do not go through `codex app-se
 | `anchor.git.worktree.prune` | `{ repoRoot }` | Runs `git worktree prune`; returns `{ prunedCount }`. |
 | `anchor.config.read` | `{ path?, anchorId? }` | Reads Codex `config.toml`, returning `{ path, exists, content, candidates[], platform }`. |
 | `anchor.config.write` | `{ content, path?, anchorId? }` | Writes Codex `config.toml`, returning `{ saved, path, bytes }`. |
+| `anchor.image.read` | `{ path, anchorId? }` | Reads an image file and returns `{ path, mimeType, dataBase64, bytes }`. |
 
 ### Turn Control
 
 | Method | Params | Notes |
 |---|---|---|
-| `turn/start` | `{ threadId, input, collaborationMode?, model?, effort?, sandboxPolicy? }` | Start a turn. `input` is `[{ type: "text", text }]`. `collaborationMode` sets plan/code mode. |
+| `turn/start` | `{ threadId, input, collaborationMode?, model?, effort?, sandboxPolicy? }` | Start a turn. `input` supports text + images: `[{ type: "text", text }, { type: "input_image", image_url, detail? }]`. `collaborationMode` sets plan/code mode. |
 | `turn/interrupt` | `{ threadId, turnId }` | Interrupt an in-progress turn. Returns `{}`, then `turn/completed` with status `"Interrupted"`. |
 
 ### Collaboration Mode
@@ -150,7 +151,7 @@ Each question: `{ id, header, question, isOther?, isSecret?, options?: [{ label,
 | `fileChange` | `{ changes: [{ path, diff? }] }` | `"file"` |
 | `mcpToolCall` | `{ tool, result?, error? }` | `"mcp"` |
 | `webSearch` | `{ query }` | `"web"` |
-| `imageView` | `{ path }` | `"image"` |
+| `imageView` | `{ path?, imageUrl?, image_url?, mimeType?, mime_type?, width?, height?, bytes? }` | `"image"` |
 | `enteredReviewMode` | `{ review }` | `"review"` |
 | `exitedReviewMode` | `{ review }` | `"review"` |
 | `plan` | `{ text }` | `"plan"` |

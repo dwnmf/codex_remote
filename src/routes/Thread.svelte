@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { ModeKind, ReasoningEffort, SandboxMode } from "../lib/types";
+    import type { ModeKind, ReasoningEffort, SandboxMode, TurnImageInput } from "../lib/types";
     import { route } from "../router";
     import { socket } from "../lib/socket.svelte";
     import { threads } from "../lib/threads.svelte";
@@ -90,11 +90,22 @@
 
     let sendError = $state<string | null>(null);
 
-    function sendTurnText(targetThreadId: string, inputText: string): boolean {
-        if (!inputText) return false;
-
+    function buildTurnInputItems(inputText: string, imageInputs: TurnImageInput[]): Array<Record<string, unknown>> {
         const normalizedInput = inputText.trim();
-        if (!normalizedInput) return false;
+        const items: Array<Record<string, unknown>> = [];
+        if (normalizedInput) {
+            items.push({ type: "text", text: normalizedInput });
+        }
+        for (const image of imageInputs) {
+            if (!image.dataUrl) continue;
+            items.push({ type: "input_image", image_url: image.dataUrl, detail: "auto" });
+        }
+        return items;
+    }
+
+    function sendTurnText(targetThreadId: string, inputText: string, imageInputs: TurnImageInput[] = []): boolean {
+        const inputItems = buildTurnInputItems(inputText, imageInputs);
+        if (inputItems.length === 0) return false;
 
         sendError = null;
 
@@ -112,7 +123,7 @@
 
         const params: Record<string, unknown> = {
             threadId: targetThreadId,
-            input: [{ type: "text", text: normalizedInput }],
+            input: inputItems,
             ...(selectedAnchorId ? { anchorId: selectedAnchorId } : {}),
         };
 
@@ -153,11 +164,15 @@
         return true;
     }
 
-    function handleSubmit(inputText: string) {
+    function handleSubmit(inputText: string, imageInputs: TurnImageInput[] = []) {
         if (!threadId) return;
 
         const normalizedInput = inputText.trim();
-        if (!normalizedInput) return;
+        if (!normalizedInput && imageInputs.length === 0) return;
+        if (imageInputs.length > 0 && (normalizedInput.startsWith("/u") || normalizedInput.startsWith("!"))) {
+            sendError = "Images can be sent with normal messages only.";
+            return;
+        }
 
         const ulwCommand = parseUlwCommand(normalizedInput);
         if (ulwCommand?.kind === "stop") {
@@ -222,7 +237,7 @@
             ulwLoopRunner.stop(threadId, "manual_user_input");
         }
 
-        sendTurnText(threadId, normalizedInput);
+        sendTurnText(threadId, normalizedInput, imageInputs);
     }
 
     function handleStop() {

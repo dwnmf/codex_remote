@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { ModeKind, ModelOption, ReasoningEffort } from "../types";
+  import { extractClipboardImageFiles, readTurnImages } from "../input-images";
+  import type { ModeKind, ModelOption, ReasoningEffort, TurnImageInput } from "../types";
 
   interface Props {
     model: string;
@@ -9,7 +10,7 @@
     modelsLoading?: boolean;
     disabled?: boolean;
     onStop?: () => void;
-    onSubmit: (input: string) => void;
+    onSubmit: (input: string, images?: TurnImageInput[]) => void;
     onModelChange: (model: string) => void;
     onReasoningChange: (effort: ReasoningEffort) => void;
     onModeChange?: (mode: ModeKind) => void;
@@ -30,10 +31,13 @@
   }: Props = $props();
 
   let input = $state("");
+  let attachedImages = $state<TurnImageInput[]>([]);
+  let attachmentError = $state<string | null>(null);
   let modelOpen = $state(false);
   let reasoningOpen = $state(false);
+  let imagePicker: HTMLInputElement | null = null;
 
-  const canSubmit = $derived(input.trim().length > 0 && !disabled);
+  const canSubmit = $derived((input.trim().length > 0 || attachedImages.length > 0) && !disabled);
 
   const reasoningOptions: { value: ReasoningEffort; label: string }[] = [
     { value: "low", label: "Low" },
@@ -65,8 +69,10 @@
   function handleSubmit(e: Event) {
     e.preventDefault();
     if (!canSubmit) return;
-    onSubmit(input.trim());
+    onSubmit(input.trim(), attachedImages);
     input = "";
+    attachedImages = [];
+    attachmentError = null;
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -102,6 +108,36 @@
       closeAllDropdowns();
     }
   }
+
+  async function handleImageSelection(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const result = await readTurnImages(files, attachedImages.length);
+    if (result.images.length > 0) {
+      attachedImages = [...attachedImages, ...result.images];
+    }
+    attachmentError = result.errors.length > 0 ? result.errors.join(" ") : null;
+  }
+
+  function openImagePicker() {
+    if (disabled) return;
+    imagePicker?.click();
+  }
+
+  function removeAttachment(id: string) {
+    attachedImages = attachedImages.filter((image) => image.id !== id);
+  }
+
+  function clearAttachments() {
+    attachedImages = [];
+    attachmentError = null;
+  }
+
+  async function handlePaste(e: ClipboardEvent) {
+    const files = extractClipboardImageFiles(e);
+    if (files.length === 0) return;
+    e.preventDefault();
+    await handleImageSelection(files);
+  }
 </script>
 
 <svelte:window onclick={handleClickOutside} />
@@ -111,10 +147,41 @@
     <textarea
       bind:value={input}
       onkeydown={handleKeydown}
-      placeholder="What would you like to do? (tip: !<command> or /u <task>)"
+      onpaste={handlePaste}
+      placeholder="What would you like to do? (tip: image paste/attach, !<command>, or /u <task>)"
       rows="1"
       {disabled}
     ></textarea>
+
+    <input
+      bind:this={imagePicker}
+      type="file"
+      accept="image/*"
+      multiple
+      class="image-picker"
+      onchange={async (e) => {
+        const files = (e.currentTarget as HTMLInputElement).files;
+        await handleImageSelection(files);
+        (e.currentTarget as HTMLInputElement).value = "";
+      }}
+    />
+
+    {#if attachedImages.length > 0}
+      <div class="attachments row">
+        {#each attachedImages as image (image.id)}
+          <div class="attachment-chip row">
+            <img src={image.dataUrl} alt={image.name} />
+            <span class="attachment-name" title={image.name}>{image.name}</span>
+            <button type="button" class="attachment-remove" onclick={() => removeAttachment(image.id)}>×</button>
+          </div>
+        {/each}
+        <button type="button" class="attachment-clear" onclick={clearAttachments}>Clear</button>
+      </div>
+    {/if}
+
+    {#if attachmentError}
+      <div class="attachment-error">{attachmentError}</div>
+    {/if}
 
     <div class="footer split">
       <div class="tools row">
@@ -135,6 +202,16 @@
           onclick={handleUlwStopShortcut}
         >
           Stop
+        </button>
+
+        <button
+          type="button"
+          class="tool-btn quick-action row"
+          title="Attach images"
+          onclick={openImagePicker}
+          disabled={disabled}
+        >
+          Img
         </button>
 
         <!-- Model Selector -->
@@ -334,6 +411,72 @@
   textarea:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .image-picker {
+    display: none;
+  }
+
+  .attachments {
+    --row-gap: var(--space-xs);
+    flex-wrap: wrap;
+    padding: 0 var(--space-md) var(--space-sm);
+  }
+
+  .attachment-chip {
+    --row-gap: var(--space-xs);
+    max-width: min(18rem, 100%);
+    padding: 0.15rem 0.4rem 0.15rem 0.15rem;
+    border: 1px solid var(--cli-border);
+    border-radius: 999px;
+    background: var(--cli-bg-elevated);
+  }
+
+  .attachment-chip img {
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: 999px;
+    object-fit: cover;
+    border: 1px solid var(--cli-border);
+  }
+
+  .attachment-name {
+    color: var(--cli-text);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 10rem;
+  }
+
+  .attachment-remove,
+  .attachment-clear {
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--cli-text-muted);
+    cursor: pointer;
+    font-size: var(--text-xs);
+    line-height: 1;
+  }
+
+  .attachment-remove:hover,
+  .attachment-clear:hover {
+    color: var(--cli-text);
+  }
+
+  .attachment-clear {
+    margin-left: var(--space-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+
+  .attachment-error {
+    padding: 0 var(--space-md) var(--space-sm);
+    color: var(--cli-error);
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
   }
 
   .footer {

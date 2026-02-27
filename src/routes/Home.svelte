@@ -14,6 +14,7 @@
     ulwRuntime,
   } from "../lib/ulw";
   import { buildBangTerminalPrompt, parseBangTerminalCommand } from "../lib/bang-command";
+  import { readTurnImages } from "../lib/input-images";
   import AppHeader from "../lib/components/AppHeader.svelte";
   import HomeTaskComposer from "../lib/components/HomeTaskComposer.svelte";
   import WorktreeModal from "../lib/components/WorktreeModal.svelte";
@@ -22,7 +23,7 @@
   import ApprovalPrompt from "../lib/components/ApprovalPrompt.svelte";
   import UserInputPrompt from "../lib/components/UserInputPrompt.svelte";
   import PlanCard from "../lib/components/PlanCard.svelte";
-  import type { ModeKind } from "../lib/types";
+  import type { ModeKind, TurnImageInput } from "../lib/types";
 
   const themeIcons = { system: "◐", light: "○", dark: "●" } as const;
   const RECENT_LIMIT = 5;
@@ -34,7 +35,9 @@
   interface ComposerPane {
     id: number;
     task: string;
+    taskAttachments: TurnImageInput[];
     terminalInput: string;
+    terminalAttachments: TurnImageInput[];
     project: string;
     threadId: string | null;
     mode: ModeKind;
@@ -66,7 +69,9 @@
       list.push({
         id: index + 1,
         task: "",
+        taskAttachments: [],
         terminalInput: "",
+        terminalAttachments: [],
         project: "",
         threadId: null,
         mode: "code",
@@ -94,7 +99,7 @@
       : false;
     return (
       isConnected &&
-      pane.task.trim().length > 0 &&
+      (pane.task.trim().length > 0 || pane.taskAttachments.length > 0) &&
       (hasThread || pane.project.trim().length > 0) &&
       !pane.isCreating &&
       !running
@@ -125,12 +130,30 @@
     return null;
   }
 
-  function sendTurnFromPane(paneId: number, targetThreadId: string, inputText: string): string | null {
+  function buildTurnInputItems(inputText: string, imageInputs: TurnImageInput[]): Array<Record<string, unknown>> {
+    const items: Array<Record<string, unknown>> = [];
+    const normalizedInput = inputText.trim();
+    if (normalizedInput) {
+      items.push({ type: "text", text: normalizedInput });
+    }
+    for (const image of imageInputs) {
+      if (!image.dataUrl) continue;
+      items.push({ type: "input_image", image_url: image.dataUrl, detail: "auto" });
+    }
+    return items;
+  }
+
+  function sendTurnFromPane(
+    paneId: number,
+    targetThreadId: string,
+    inputText: string,
+    imageInputs: TurnImageInput[] = [],
+  ): string | null {
     const pane = getPane(paneId);
     if (!pane) return "Pane not found";
 
-    const text = inputText.trim();
-    if (!text) return "Input is empty";
+    const input = buildTurnInputItems(inputText, imageInputs);
+    if (input.length === 0) return "Input is empty";
 
     const selectedAnchorId = !auth.isLocalMode ? anchors.selectedId : null;
     if (!auth.isLocalMode) {
@@ -140,7 +163,7 @@
 
     const params: Record<string, unknown> = {
       threadId: targetThreadId,
-      input: [{ type: "text", text }],
+      input,
       ...(selectedAnchorId ? { anchorId: selectedAnchorId } : {}),
     };
 
@@ -171,12 +194,15 @@
     }
   }
 
-  function submitToExistingThread(paneId: number, rawInput: string): string | null {
+  function submitToExistingThread(paneId: number, rawInput: string, imageInputs: TurnImageInput[] = []): string | null {
     const pane = getPane(paneId);
     if (!pane?.threadId) return "Session is not started for this window.";
 
     const normalizedInput = rawInput.trim();
-    if (!normalizedInput) return "Input is empty";
+    if (!normalizedInput && imageInputs.length === 0) return "Input is empty";
+    if (imageInputs.length > 0 && (normalizedInput.startsWith("/u") || normalizedInput.startsWith("!"))) {
+      return "Images can be sent with normal messages only.";
+    }
 
     const ulwCommand = parseUlwCommand(normalizedInput);
     const loopDeps = {
@@ -234,7 +260,7 @@
     if (ulwRuntime.isActive(pane.threadId)) {
       ulwLoopRunner.stop(pane.threadId, "manual_user_input");
     }
-    return sendTurnFromPane(paneId, pane.threadId, normalizedInput);
+    return sendTurnFromPane(paneId, pane.threadId, normalizedInput, imageInputs);
   }
 
   function handleStopPane(paneId: number) {
@@ -285,8 +311,48 @@
     updatePane(paneId, { task: value });
   }
 
+  function handleTaskImagesAdded(paneId: number, images: TurnImageInput[]) {
+    const pane = getPane(paneId);
+    if (!pane || images.length === 0) return;
+    updatePane(paneId, { taskAttachments: [...pane.taskAttachments, ...images] });
+  }
+
+  function handleTaskImageRemoved(paneId: number, imageId: string) {
+    const pane = getPane(paneId);
+    if (!pane) return;
+    updatePane(paneId, { taskAttachments: pane.taskAttachments.filter((image) => image.id !== imageId) });
+  }
+
+  function handleTaskImagesCleared(paneId: number) {
+    updatePane(paneId, { taskAttachments: [] });
+  }
+
   function handleTerminalInputChange(paneId: number, value: string) {
     updatePane(paneId, { terminalInput: value });
+  }
+
+  async function handleTerminalImagesSelected(paneId: number, files: FileList | null) {
+    const pane = getPane(paneId);
+    if (!pane || !files || files.length === 0) return;
+    const result = await readTurnImages(files, pane.terminalAttachments.length);
+    if (result.images.length > 0) {
+      updatePane(paneId, { terminalAttachments: [...pane.terminalAttachments, ...result.images], submitError: null });
+    }
+    if (result.errors.length > 0) {
+      updatePane(paneId, { submitError: result.errors.join(" ") });
+    }
+  }
+
+  function handleTerminalImageRemoved(paneId: number, imageId: string) {
+    const pane = getPane(paneId);
+    if (!pane) return;
+    updatePane(paneId, {
+      terminalAttachments: pane.terminalAttachments.filter((image) => image.id !== imageId),
+    });
+  }
+
+  function clearTerminalImages(paneId: number) {
+    updatePane(paneId, { terminalAttachments: [] });
   }
 
   function handleSelectModel(paneId: number, value: string) {
@@ -307,16 +373,17 @@
   function canSendTerminalInput(pane: ComposerPane): boolean {
     if (!pane.threadId) return false;
     if (!isConnected) return false;
-    if (pane.terminalInput.trim().length === 0) return false;
+    if (pane.terminalInput.trim().length === 0 && pane.terminalAttachments.length === 0) return false;
     return !paneIsRunning(pane);
   }
 
   function handleTerminalInputSubmit(paneId: number) {
     const pane = getPane(paneId);
     if (!pane?.threadId || !canSendTerminalInput(pane)) return;
-    const error = submitToExistingThread(paneId, pane.terminalInput);
+    const error = submitToExistingThread(paneId, pane.terminalInput, pane.terminalAttachments);
     updatePane(paneId, {
       terminalInput: error ? pane.terminalInput : "",
+      terminalAttachments: error ? pane.terminalAttachments : [],
       submitError: error,
     });
   }
@@ -344,9 +411,10 @@
     const rawInput = pane.task.trim();
 
     if (pane.threadId) {
-      const error = submitToExistingThread(paneId, rawInput);
+      const error = submitToExistingThread(paneId, rawInput, pane.taskAttachments);
       updatePane(paneId, {
         task: error ? pane.task : "",
+        taskAttachments: error ? pane.taskAttachments : [],
         submitError: error,
       });
       return;
@@ -367,6 +435,10 @@
       updatePane(paneId, { submitError: "Usage: !<command> or !pwsh|cmd|bash|sh|zsh|fish <command>" });
       return;
     }
+    if (pane.taskAttachments.length > 0 && (ulwCommand || bangCommand)) {
+      updatePane(paneId, { submitError: "Images can be sent with normal messages only." });
+      return;
+    }
 
     const token = Date.now() + Math.floor(Math.random() * 1000);
     updatePane(paneId, { isCreating: true, pendingStartToken: token, submitError: null });
@@ -380,7 +452,8 @@
         ? threads.resolveCollaborationMode(pane.mode, effectiveModel, "medium")
         : undefined;
 
-      const startInput = ulwCommand?.kind === "start"
+      const hasStartImages = pane.taskAttachments.length > 0;
+      const startInput = hasStartImages || ulwCommand?.kind === "start"
         ? undefined
         : bangCommand
           ? buildBangTerminalPrompt(bangCommand)
@@ -389,10 +462,11 @@
         suppressNavigation: true,
         ...(collaborationMode ? { collaborationMode } : {}),
         onThreadStarted: (threadId) => {
-          updatePane(paneId, { task: "", threadId, submitError: null });
+          updatePane(paneId, { threadId, submitError: null });
           clearPendingStart(paneId, token);
 
           if (ulwCommand?.kind === "start") {
+            updatePane(paneId, { task: "", taskAttachments: [] });
             if (!ulwCommand.task) {
               updatePane(paneId, { submitError: "Add task after /u when launching from Home." });
               return;
@@ -411,6 +485,15 @@
               },
               loopDeps,
             );
+          } else if (hasStartImages) {
+            const sendError = sendTurnFromPane(paneId, threadId, rawInput, pane.taskAttachments);
+            if (sendError) {
+              updatePane(paneId, { task: rawInput, taskAttachments: pane.taskAttachments, submitError: sendError });
+            } else {
+              updatePane(paneId, { task: "", taskAttachments: [] });
+            }
+          } else {
+            updatePane(paneId, { task: "", taskAttachments: [] });
           }
         },
         onThreadStartFailed: (error) => {
@@ -535,10 +618,14 @@
                 modelsStatus={models.status}
                 modelOptions={models.options}
                 selectedModel={pane.selectedModel}
+                taskAttachments={pane.taskAttachments}
                 on:taskChange={(e) => handleTaskChange(pane.id, e.detail.value)}
                 on:toggleMode={() => handleToggleMode(pane.id)}
                 on:openWorktrees={() => handleOpenWorktrees(pane.id)}
                 on:selectModel={(e) => handleSelectModel(pane.id, e.detail.value)}
+                on:taskImagesAdded={(e) => handleTaskImagesAdded(pane.id, e.detail.images)}
+                on:taskImageRemoved={(e) => handleTaskImageRemoved(pane.id, e.detail.id)}
+                on:taskImagesCleared={() => handleTaskImagesCleared(pane.id)}
                 on:submit={() => handleSubmit(pane.id)}
               />
 
@@ -610,8 +697,23 @@
                     }}
                   >
                     <input
+                      id={"terminal-images-" + pane.id}
+                      class="terminal-image-picker"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onchange={async (e) => {
+                        const target = e.currentTarget as HTMLInputElement;
+                        await handleTerminalImagesSelected(pane.id, target.files);
+                        target.value = "";
+                      }}
+                    />
+                    <label class="terminal-attach" for={"terminal-images-" + pane.id} title="Attach images">
+                      Img
+                    </label>
+                    <input
                       type="text"
-                      placeholder="Type message, !command, or /u command for this window"
+                      placeholder="Type message, attach image, !command, or /u command for this window"
                       value={pane.terminalInput}
                       oninput={(e) => handleTerminalInputChange(pane.id, (e.currentTarget as HTMLInputElement).value)}
                       disabled={!pane.threadId || !isConnected || paneIsRunning(pane)}
@@ -620,6 +722,20 @@
                       Send
                     </button>
                   </form>
+                  {#if pane.terminalAttachments.length > 0}
+                    <div class="terminal-attachments row">
+                      {#each pane.terminalAttachments as image (image.id)}
+                        <div class="terminal-attachment row">
+                          <img src={image.dataUrl} alt={image.name} />
+                          <span>{image.name}</span>
+                          <button type="button" onclick={() => handleTerminalImageRemoved(pane.id, image.id)}>×</button>
+                        </div>
+                      {/each}
+                      <button type="button" class="terminal-attachment-clear" onclick={() => clearTerminalImages(pane.id)}>
+                        Clear
+                      </button>
+                    </div>
+                  {/if}
                 </section>
               {/if}
             </div>
@@ -887,7 +1003,22 @@
     background: var(--cli-bg-elevated);
   }
 
-  .pane-terminal-input input {
+  .terminal-image-picker {
+    display: none;
+  }
+
+  .terminal-attach {
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-sm);
+    padding: 0.28rem 0.42rem;
+    background: transparent;
+    color: var(--cli-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+
+  .pane-terminal-input input[type="text"] {
     flex: 1;
     min-width: 0;
     border: 1px solid var(--cli-border);
@@ -899,7 +1030,7 @@
     font-size: var(--text-xs);
   }
 
-  .pane-terminal-input input:focus {
+  .pane-terminal-input input[type="text"]:focus {
     outline: none;
     border-color: var(--cli-prefix-agent);
   }
@@ -925,6 +1056,60 @@
     color: var(--cli-text-muted);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
+  }
+
+  .terminal-attachments {
+    --row-gap: var(--space-xs);
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    padding: 0 var(--space-xs) var(--space-xs);
+    border-top: 1px solid var(--cli-border);
+    background: var(--cli-bg-elevated);
+  }
+
+  .terminal-attachment {
+    --row-gap: var(--space-xs);
+    max-width: min(14rem, 100%);
+    padding: 0.1rem 0.35rem 0.1rem 0.1rem;
+    border: 1px solid var(--cli-border);
+    border-radius: 999px;
+    background: var(--cli-bg);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--cli-text-muted);
+  }
+
+  .terminal-attachment img {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 999px;
+    object-fit: cover;
+    border: 1px solid var(--cli-border);
+  }
+
+  .terminal-attachment span {
+    max-width: 8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .terminal-attachment button,
+  .terminal-attachment-clear {
+    border: none;
+    background: transparent;
+    color: var(--cli-text-muted);
+    cursor: pointer;
+    padding: 0;
+    font-size: var(--text-xs);
+    line-height: 1;
+  }
+
+  .terminal-attachment-clear {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+    margin-left: var(--space-xs);
   }
 
   .error {

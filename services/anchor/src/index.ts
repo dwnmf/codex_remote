@@ -1,6 +1,6 @@
 import { hostname, homedir } from "node:os";
 import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import type { WsClient } from "./types";
 
@@ -34,6 +34,7 @@ let orbitHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let orbitHeartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
 let warnedNoAppServer = false;
 let appServerInitialized = false;
+const MAX_IMAGE_READ_BYTES = 20 * 1024 * 1024;
 
 // Buffer pending approval requests from app-server so we can re-send them
 // when a client (re)subscribes to a thread via orbit.
@@ -220,6 +221,54 @@ async function handleCodexConfigWrite(
   }
 }
 
+async function handleAnchorImageRead(
+  id: number | string,
+  params: JsonObject | null,
+): Promise<JsonObject> {
+  try {
+    const imagePath = ensureAbsolutePath(getParamString(params, "path"), "path");
+    const file = Bun.file(imagePath);
+    if (!(await file.exists())) {
+      return { id, error: { code: -1, message: "Image file not found" } };
+    }
+
+    const fileBytes = file.size;
+    if (fileBytes > MAX_IMAGE_READ_BYTES) {
+      return {
+        id,
+        error: {
+          code: -1,
+          message: `Image too large (${Math.round(fileBytes / (1024 * 1024))}MB). Max ${Math.round(MAX_IMAGE_READ_BYTES / (1024 * 1024))}MB.`,
+        },
+      };
+    }
+
+    const extensionMime = inferImageMimeFromPath(imagePath);
+    const fileMime = typeof file.type === "string" && file.type.trim() ? file.type : "";
+    const mimeType = fileMime.startsWith("image/")
+      ? fileMime
+      : extensionMime ?? "";
+
+    if (!mimeType.startsWith("image/")) {
+      return { id, error: { code: -1, message: "Requested file is not an image" } };
+    }
+
+    const dataBase64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+    return {
+      id,
+      result: {
+        path: imagePath,
+        mimeType,
+        dataBase64,
+        bytes: fileBytes,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to read image";
+    return { id, error: { code: -1, message } };
+  }
+}
+
 interface GitCommandResult {
   ok: boolean;
   code: number;
@@ -368,6 +417,31 @@ function makeShortUid(): string {
     return crypto.randomUUID().replace(/-/g, "").slice(0, 6).toLowerCase();
   }
   return Math.random().toString(36).slice(2, 8);
+}
+
+function inferImageMimeFromPath(path: string): string | null {
+  const extension = extname(path).toLowerCase();
+  switch (extension) {
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".webp":
+      return "image/webp";
+    case ".bmp":
+      return "image/bmp";
+    case ".svg":
+      return "image/svg+xml";
+    case ".avif":
+      return "image/avif";
+    case ".ico":
+      return "image/x-icon";
+    default:
+      return null;
+  }
 }
 
 async function handleGitInspect(id: number | string, params: JsonObject | null): Promise<JsonObject> {
@@ -561,6 +635,9 @@ async function maybeHandleAnchorLocalRpc(message: JsonObject): Promise<JsonObjec
   }
   if (message.method === "anchor.config.write") {
     return handleCodexConfigWrite(id, params);
+  }
+  if (message.method === "anchor.image.read") {
+    return handleAnchorImageRead(id, params);
   }
 
   return null;

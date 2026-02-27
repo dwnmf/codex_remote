@@ -457,6 +457,49 @@ class MessagesStore {
     return trimmed;
   }
 
+  #toStringValue(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+
+  #toNumberValue(value: unknown): number | null {
+    if (typeof value !== "number" || !Number.isFinite(value)) return null;
+    return value;
+  }
+
+  #buildImageMessage(
+    threadId: string,
+    itemId: string,
+    item: Record<string, unknown>,
+  ): Message {
+    const imagePath = this.#toStringValue(item.path);
+    const imageUrl = this.#toStringValue(item.imageUrl) ?? this.#toStringValue(item.image_url) ?? this.#toStringValue(item.url);
+    const imageMimeType = this.#toStringValue(item.mimeType) ?? this.#toStringValue(item.mime_type);
+    const imageWidth = this.#toNumberValue(item.width);
+    const imageHeight = this.#toNumberValue(item.height);
+    const imageBytes = this.#toNumberValue(item.bytes);
+
+    const metadata: Message["metadata"] = {
+      ...(imagePath ? { imagePath } : {}),
+      ...(imageUrl ? { imageUrl } : {}),
+      ...(imageMimeType ? { imageMimeType } : {}),
+      ...(imageWidth !== null ? { imageWidth } : {}),
+      ...(imageHeight !== null ? { imageHeight } : {}),
+      ...(imageBytes !== null ? { imageBytes } : {}),
+    };
+
+    const source = imagePath ?? imageUrl ?? "unknown";
+    return {
+      id: itemId,
+      role: "tool",
+      kind: "image",
+      text: `Image: ${source}`,
+      threadId,
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+    };
+  }
+
   handleMessage(msg: RpcMessage) {
     if (msg.result && !msg.method) {
       const result = msg.result as { thread?: { id: string; turns?: Array<{ items?: unknown[] }> } };
@@ -804,8 +847,7 @@ class MessagesStore {
           return;
         }
         case "imageView": {
-          const text = `Image: ${item.path ?? ""}`;
-          this.#upsert(threadId, { id: itemId, role: "tool", kind: "image", text, threadId });
+          this.#upsert(threadId, this.#buildImageMessage(threadId, itemId, item));
           return;
         }
         case "enteredReviewMode": {
@@ -936,13 +978,7 @@ class MessagesStore {
             break;
 
           case "imageView":
-            messages.push({
-              id,
-              role: "tool",
-              kind: "image",
-              text: `Image: ${item.path ?? ""}`,
-              threadId,
-            });
+            messages.push(this.#buildImageMessage(threadId, id, item));
             break;
 
           case "enteredReviewMode": {

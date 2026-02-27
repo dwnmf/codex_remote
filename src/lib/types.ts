@@ -60,6 +60,20 @@ export interface MessageMetadata {
   exitCode?: number;
   linesAdded?: number;
   linesRemoved?: number;
+  imagePath?: string;
+  imageUrl?: string;
+  imageMimeType?: string;
+  imageWidth?: number;
+  imageHeight?: number;
+  imageBytes?: number;
+}
+
+export interface TurnImageInput {
+  id: string;
+  name: string;
+  mimeType: string;
+  bytes: number;
+  dataUrl: string;
 }
 
 export interface ApprovalRequest {
@@ -199,6 +213,7 @@ export interface GitWorktreeCreateParams {
   baseRef?: string;
   branchName?: string;
   path?: string;
+  rootDir?: string;
 }
 
 export interface GitWorktreeCreateResult {

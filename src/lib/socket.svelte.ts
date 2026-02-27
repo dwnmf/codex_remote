@@ -66,6 +66,13 @@ export interface CodexConfigWriteResult {
   bytes: number;
 }
 
+export interface AnchorImageReadResult {
+  path: string;
+  mimeType: string;
+  dataBase64: string;
+  bytes: number;
+}
+
 class SocketStore {
   status = $state<ConnectionStatus>("disconnected");
   error = $state<string | null>(null);
@@ -395,6 +402,33 @@ class SocketStore {
         params: {
           content,
           ...(path?.trim() ? { path: path.trim() } : {}),
+          ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+        },
+      });
+      if (!result.success) {
+        this.#pendingRpc.delete(id);
+        reject(new Error(result.error ?? "Not connected"));
+      }
+    });
+  }
+
+  readImageAsset(path: string, anchorId?: string): Promise<AnchorImageReadResult> {
+    const normalizedPath = path.trim();
+    if (!normalizedPath) {
+      return Promise.reject(new Error("path is required"));
+    }
+
+    const id = `anchor-image-read-${++this.#rpcIdCounter}`;
+    return new Promise((resolve, reject) => {
+      this.#pendingRpc.set(id, {
+        resolve: (v) => resolve(v as AnchorImageReadResult),
+        reject,
+      });
+      const result = this.send({
+        id,
+        method: "anchor.image.read",
+        params: {
+          path: normalizedPath,
           ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
         },
       });

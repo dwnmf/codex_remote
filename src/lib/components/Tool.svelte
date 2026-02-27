@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
+  import { socket } from "../socket.svelte";
+  import { anchors } from "../anchors.svelte";
+  import { auth } from "../auth.svelte";
   import type { Message } from "../types";
 
   interface Props {
@@ -9,7 +12,11 @@
 
   const { message, defaultOpen = false }: Props = $props();
 
-  let isOpen = $state(untrack(() => defaultOpen));
+  let isOpen = $state(untrack(() => defaultOpen || message.kind === "image"));
+  let imagePreviewUrl = $state<string | null>(null);
+  let imageLoading = $state(false);
+  let imageError = $state<string | null>(null);
+  let loadedImageKey = $state("");
 
   function toggle() {
     isOpen = !isOpen;
@@ -78,7 +85,8 @@
 
     if (kind === "image") {
       const match = text.match(/^Image:\s*(.+?)(?:\n|$)/);
-      return { title: match?.[1] || "Image", content: "" };
+      const source = message.metadata?.imagePath || message.metadata?.imageUrl || match?.[1];
+      return { title: source || "Image", content: "" };
     }
 
     if (kind === "plan") {
@@ -112,7 +120,75 @@
     }
   });
 
+  const isImage = $derived(message.kind === "image");
   const hasContent = $derived(toolInfo.content && toolInfo.content.trim().length > 0);
+  const hasBody = $derived(isImage || hasContent);
+
+  const imagePath = $derived.by(() => {
+    const path = message.metadata?.imagePath?.trim();
+    if (path) return path;
+    const match = message.text.match(/^Image:\s*(.+?)(?:\n|$)/);
+    const parsed = match?.[1]?.trim();
+    if (!parsed || /^(https?:|data:|blob:)/i.test(parsed)) return null;
+    return parsed;
+  });
+
+  const inlineImageUrl = $derived.by(() => {
+    const metadataUrl = message.metadata?.imageUrl?.trim();
+    if (metadataUrl && /^(https?:|data:|blob:)/i.test(metadataUrl)) return metadataUrl;
+
+    const match = message.text.match(/^Image:\s*(.+?)(?:\n|$)/);
+    const parsed = match?.[1]?.trim();
+    if (parsed && /^(https?:|data:|blob:)/i.test(parsed)) return parsed;
+    return null;
+  });
+
+  function resolveAnchorIdForImageRead(): string | undefined {
+    if (auth.isLocalMode) return undefined;
+    const selected = anchors.selectedId?.trim();
+    return selected ? selected : undefined;
+  }
+
+  $effect(() => {
+    if (!isImage || !isOpen) return;
+
+    const directUrl = inlineImageUrl;
+    const path = imagePath;
+    const anchorId = resolveAnchorIdForImageRead();
+    const key = `${directUrl ?? ""}|${path ?? ""}|${anchorId ?? ""}`;
+    if (loadedImageKey === key) return;
+    loadedImageKey = key;
+
+    imageError = null;
+    if (directUrl) {
+      imagePreviewUrl = directUrl;
+      imageLoading = false;
+      return;
+    }
+
+    if (!path) {
+      imagePreviewUrl = null;
+      imageLoading = false;
+      imageError = "No image source available.";
+      return;
+    }
+
+    imagePreviewUrl = null;
+    imageLoading = true;
+    void socket.readImageAsset(path, anchorId)
+      .then((result) => {
+        imagePreviewUrl = `data:${result.mimeType};base64,${result.dataBase64}`;
+        imageLoading = false;
+      })
+      .catch((err) => {
+        imageLoading = false;
+        imageError = err instanceof Error ? err.message : "Failed to load image.";
+      });
+  });
+
+  onDestroy(() => {
+    imagePreviewUrl = null;
+  });
 </script>
 
 <div class="tool" class:open={isOpen}>
@@ -190,7 +266,7 @@
       <span class="status-label">{statusConfig.label}</span>
     </span>
 
-    {#if hasContent}
+    {#if hasBody}
       <svg
         class="chevron"
         class:open={isOpen}
@@ -204,9 +280,36 @@
     {/if}
   </button>
 
-  {#if isOpen && hasContent}
+  {#if isOpen && hasBody}
     <div class="tool-content">
-      <pre class="tool-output">{toolInfo.content}</pre>
+      {#if isImage}
+        <div class="tool-image-content stack">
+          {#if imageLoading}
+            <div class="tool-image-status">Loading image...</div>
+          {:else if imageError}
+            <div class="tool-image-status error">{imageError}</div>
+          {:else if imagePreviewUrl}
+            <a class="tool-image-link" href={imagePreviewUrl} target="_blank" rel="noreferrer">
+              <img class="tool-image-preview" src={imagePreviewUrl} alt={toolInfo.title} loading="lazy" />
+            </a>
+            <div class="tool-image-meta">
+              {#if message.metadata?.imageWidth && message.metadata?.imageHeight}
+                {message.metadata.imageWidth}×{message.metadata.imageHeight}
+                {#if message.metadata?.imageBytes}
+                  ·
+                {/if}
+              {/if}
+              {#if message.metadata?.imageBytes}
+                {Math.round(message.metadata.imageBytes / 1024)}KB
+              {/if}
+            </div>
+          {:else}
+            <div class="tool-image-status">Image unavailable.</div>
+          {/if}
+        </div>
+      {:else}
+        <pre class="tool-output">{toolInfo.content}</pre>
+      {/if}
     </div>
   {/if}
 </div>
@@ -300,6 +403,40 @@
     word-break: break-word;
     max-height: 300px;
     overflow-y: auto;
+  }
+
+  .tool-image-content {
+    --stack-gap: var(--space-xs);
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .tool-image-link {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  .tool-image-preview {
+    display: block;
+    max-width: min(100%, 720px);
+    max-height: min(60vh, 520px);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--cli-border);
+    background: var(--cli-bg-elevated);
+  }
+
+  .tool-image-status {
+    color: var(--cli-text-muted);
+    font-size: var(--text-xs);
+  }
+
+  .tool-image-status.error {
+    color: var(--cli-error);
+  }
+
+  .tool-image-meta {
+    color: var(--cli-text-muted);
+    font-size: var(--text-xs);
   }
 
   @keyframes slideIn {

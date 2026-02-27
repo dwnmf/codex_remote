@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import type { ModeKind, ModelOption } from "../types";
+  import { extractClipboardImageFiles, readTurnImages } from "../input-images";
+  import type { ModeKind, ModelOption, TurnImageInput } from "../types";
 
   interface Props {
     task: string;
@@ -12,6 +13,7 @@
     modelsStatus: string;
     modelOptions: ModelOption[];
     selectedModel: string;
+    taskAttachments: TurnImageInput[];
   }
 
   const {
@@ -24,6 +26,7 @@
     modelsStatus,
     modelOptions,
     selectedModel,
+    taskAttachments,
   }: Props = $props();
 
   const dispatch = createEventDispatcher<{
@@ -32,9 +35,14 @@
     toggleMode: void;
     openWorktrees: void;
     selectModel: { value: string };
+    taskImagesAdded: { images: TurnImageInput[] };
+    taskImageRemoved: { id: string };
+    taskImagesCleared: void;
   }>();
 
   let modelOpen = $state(false);
+  let attachmentError = $state<string | null>(null);
+  let imagePicker: HTMLInputElement | null = null;
 
   function handleTaskKeydown(e: KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -46,6 +54,27 @@
   function handleWindowClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (!target.closest(".dropdown")) modelOpen = false;
+  }
+
+  async function handleImageSelection(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const result = await readTurnImages(files, taskAttachments.length);
+    if (result.images.length > 0) {
+      dispatch("taskImagesAdded", { images: result.images });
+    }
+    attachmentError = result.errors.length > 0 ? result.errors.join(" ") : null;
+  }
+
+  function openImagePicker() {
+    if (isCreating) return;
+    imagePicker?.click();
+  }
+
+  async function handlePaste(e: ClipboardEvent) {
+    const files = extractClipboardImageFiles(e);
+    if (files.length === 0) return;
+    e.preventDefault();
+    await handleImageSelection(files);
   }
 </script>
 
@@ -65,10 +94,47 @@
       dispatch("taskChange", { value });
     }}
     onkeydown={handleTaskKeydown}
-    placeholder="Fix a bug, build a feature, refactor code... (or !<command> or /u <task>)"
+    onpaste={handlePaste}
+    placeholder="Fix a bug, build a feature, refactor code... (or attach/paste image, !<command>, /u <task>)"
     rows="3"
     disabled={isCreating}
   ></textarea>
+
+  <input
+    bind:this={imagePicker}
+    type="file"
+    accept="image/*"
+    multiple
+    class="image-picker"
+    onchange={async (e) => {
+      const files = (e.currentTarget as HTMLInputElement).files;
+      await handleImageSelection(files);
+      (e.currentTarget as HTMLInputElement).value = "";
+    }}
+  />
+
+  {#if taskAttachments.length > 0}
+    <div class="attachments row">
+      {#each taskAttachments as image (image.id)}
+        <div class="attachment-chip row">
+          <img src={image.dataUrl} alt={image.name} />
+          <span class="attachment-name" title={image.name}>{image.name}</span>
+          <button
+            type="button"
+            class="attachment-remove"
+            onclick={() => dispatch("taskImageRemoved", { id: image.id })}
+          >
+            ×
+          </button>
+        </div>
+      {/each}
+      <button type="button" class="attachment-clear" onclick={() => dispatch("taskImagesCleared")}>Clear</button>
+    </div>
+  {/if}
+
+  {#if attachmentError}
+    <div class="attachment-error">{attachmentError}</div>
+  {/if}
 
   <div class="input-footer split">
     <div class="tools row">
@@ -142,6 +208,15 @@
           </svg>
           <span>Code</span>
         {/if}
+      </button>
+
+      <button
+        type="button"
+        class="tool-btn row"
+        onclick={openImagePicker}
+        disabled={isCreating}
+      >
+        <span>Img</span>
       </button>
     </div>
 
@@ -236,6 +311,72 @@
   .input-card textarea:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .image-picker {
+    display: none;
+  }
+
+  .attachments {
+    --row-gap: var(--space-xs);
+    flex-wrap: wrap;
+    padding: 0 var(--space-md) 0.55rem;
+  }
+
+  .attachment-chip {
+    --row-gap: var(--space-xs);
+    max-width: min(18rem, 100%);
+    padding: 0.12rem 0.4rem 0.12rem 0.12rem;
+    border: 1px solid color-mix(in srgb, var(--cli-border) 65%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--cli-bg-elevated) 86%, var(--cli-bg));
+  }
+
+  .attachment-chip img {
+    width: 1.1rem;
+    height: 1.1rem;
+    border-radius: 999px;
+    object-fit: cover;
+    border: 1px solid var(--cli-border);
+  }
+
+  .attachment-name {
+    color: var(--cli-text);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 10rem;
+  }
+
+  .attachment-remove,
+  .attachment-clear {
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--cli-text-muted);
+    cursor: pointer;
+    font-size: var(--text-xs);
+    line-height: 1;
+  }
+
+  .attachment-clear {
+    margin-left: var(--space-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 700;
+  }
+
+  .attachment-remove:hover,
+  .attachment-clear:hover {
+    color: var(--cli-text);
+  }
+
+  .attachment-error {
+    padding: 0 var(--space-md) 0.5rem;
+    color: var(--cli-error);
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
   }
 
   .input-footer {
