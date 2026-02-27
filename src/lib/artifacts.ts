@@ -11,6 +11,13 @@ function toStringValue(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
+function toIdValue(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return toStringValue(value);
+}
+
 function toIsoDate(value: unknown): string {
   if (typeof value === "number" && Number.isFinite(value)) {
     return new Date(value).toISOString();
@@ -83,9 +90,9 @@ export function normalizeArtifact(value: unknown, fallbackThreadId?: string): Or
   if (!record) return null;
 
   const id =
-    toStringValue(record.id) ??
-    toStringValue(record.artifactId) ??
-    toStringValue(record.artifact_id);
+    toIdValue(record.id) ??
+    toIdValue(record.artifactId) ??
+    toIdValue(record.artifact_id);
   const threadId =
     toStringValue(record.threadId) ??
     toStringValue(record.thread_id) ??

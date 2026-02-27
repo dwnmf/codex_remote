@@ -40,6 +40,27 @@ describe("artifact parsers", () => {
     expect(result.artifacts.map((item) => item.id)).toEqual(["a-new", "a-old"]);
   });
 
+  test("accepts numeric artifact ids from backend payloads", () => {
+    const result = normalizeArtifactsListResult(
+      {
+        artifacts: [
+          {
+            id: 42,
+            threadId: "thread-1",
+            artifactType: "command",
+            summary: "pwsh command",
+            createdAt: 1740787200000,
+          },
+        ],
+      },
+      "thread-1",
+    );
+
+    expect(result.artifacts).toHaveLength(1);
+    expect(result.artifacts[0].id).toBe("42");
+    expect(result.artifacts[0].threadId).toBe("thread-1");
+  });
+
   test("extracts multi-dispatch entries", () => {
     const payloads = extractMultiDispatchPayloads({
       type: "orbit.multi-dispatch",
