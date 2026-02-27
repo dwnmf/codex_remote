@@ -61,6 +61,31 @@ describe("artifact parsers", () => {
     expect(result.artifacts[0].threadId).toBe("thread-1");
   });
 
+  test("extracts file paths from command payload metadata", () => {
+    const result = normalizeArtifactsListResult(
+      {
+        artifacts: [
+          {
+            id: 99,
+            threadId: "thread-2",
+            itemType: "commandExecution",
+            summary: "\"pwsh\" -Command \"Set-Content -Path artifact.txt -Value 'artifact'\"",
+            payload: {
+              type: "commandExecution",
+              command: "\"pwsh\" -Command \"Set-Content -Path artifact.txt -Value 'artifact'\"",
+            },
+            createdAt: "2026-02-28T00:00:00.000Z",
+          },
+        ],
+      },
+      "thread-2",
+    );
+
+    expect(result.artifacts).toHaveLength(1);
+    expect(result.artifacts[0].type).toBe("commandExecution");
+    expect(result.artifacts[0].metadata?.paths).toEqual(["artifact.txt"]);
+  });
+
   test("extracts multi-dispatch entries", () => {
     const payloads = extractMultiDispatchPayloads({
       type: "orbit.multi-dispatch",

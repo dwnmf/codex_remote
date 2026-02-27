@@ -45,6 +45,87 @@ function toStringArray(value: unknown): string[] {
     .filter((item): item is string => Boolean(item));
 }
 
+function toRecordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => toRecord(item))
+    .filter((item): item is Record<string, unknown> => Boolean(item));
+}
+
+function stripQuoted(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function uniqStrings(values: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const normalized = value.trim().replace(/^\.?[\\/]/, "").replace(/\\/g, "/");
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function extractCommandPaths(command: string): string[] {
+  const paths: string[] = [];
+  const pathFlag = /(?:^|\s)-Path\s+("[^"]+"|'[^']+'|[^\s]+)/gi;
+  let match = pathFlag.exec(command);
+  while (match) {
+    const candidate = stripQuoted(match[1] ?? "");
+    if (candidate) paths.push(candidate);
+    match = pathFlag.exec(command);
+  }
+
+  const redirect = />\s*("[^"]+"|'[^']+'|[^\s]+)/g;
+  match = redirect.exec(command);
+  while (match) {
+    const candidate = stripQuoted(match[1] ?? "");
+    if (candidate) paths.push(candidate);
+    match = redirect.exec(command);
+  }
+
+  return uniqStrings(paths);
+}
+
+function extractPayloadPaths(payload: Record<string, unknown> | null): string[] {
+  if (!payload) return [];
+
+  const fromChanges = toRecordArray(payload.changes)
+    .map((entry) => toStringValue(entry.path))
+    .filter((value): value is string => Boolean(value));
+
+  const command = toStringValue(payload.command);
+  const fromCommand = command ? extractCommandPaths(command) : [];
+  return uniqStrings([...fromChanges, ...fromCommand]);
+}
+
+function humanizeArtifactType(rawType: string): string {
+  const normalized = rawType.trim().toLowerCase();
+  if (!normalized) return "artifact";
+  const map: Record<string, string> = {
+    command: "command",
+    commandexecution: "command",
+    file: "file change",
+    filechange: "file change",
+    image: "image",
+    imageview: "image",
+    tool: "tool call",
+    mcptoolcall: "tool call",
+    websearch: "web search",
+    collabagenttoolcall: "collab call",
+  };
+  return map[normalized] ?? normalized.replace(/[-_]+/g, " ");
+}
+
 function normalizeArtifactLink(value: unknown): OrbitArtifactLink | null {
   if (typeof value === "string") {
     const href = toStringValue(value);
@@ -103,26 +184,40 @@ export function normalizeArtifact(value: unknown, fallbackThreadId?: string): Or
 
   const type =
     toStringValue(record.type) ??
+    toStringValue(record.artifactType) ??
+    toStringValue(record.artifact_type) ??
+    toStringValue(record.itemType) ??
+    toStringValue(record.item_type) ??
     toStringValue(record.kind) ??
     toStringValue(record.channel) ??
     "artifact";
-  const title =
-    toStringValue(record.title) ??
-    toStringValue(record.label) ??
-    toStringValue(record.name) ??
-    toStringValue(record.summary) ??
-    type;
-  const summary =
+  const payloadRecord = toRecord(record.payload);
+  const extractedPaths = extractPayloadPaths(payloadRecord);
+  const rawSummary =
     toStringValue(record.summary) ??
     toStringValue(record.description) ??
     toStringValue(record.text) ??
     undefined;
+  const summary = rawSummary ?? (extractedPaths.length > 0 ? extractedPaths.join(", ") : undefined);
+  const titleCandidate =
+    toStringValue(record.title) ??
+    toStringValue(record.label) ??
+    toStringValue(record.name);
+  const typeLabel = humanizeArtifactType(type);
+  const title =
+    titleCandidate ??
+    (rawSummary && rawSummary.length <= 96 ? rawSummary : typeLabel);
   const status = toStringValue(record.status) ?? toStringValue(record.state) ?? undefined;
   const createdAt = toIsoDate(
     record.createdAt ?? record.created_at ?? record.timestamp ?? record.ts ?? record.time,
   );
   const links = normalizeArtifactLinks(record);
-  const metadata = toRecord(record.metadata) ?? undefined;
+  const metadataSeed = toRecord(record.metadata) ?? {};
+  const metadata: Record<string, unknown> = {
+    ...metadataSeed,
+    ...(payloadRecord ? { payload: payloadRecord } : {}),
+    ...(extractedPaths.length > 0 ? { paths: extractedPaths } : {}),
+  };
 
   return {
     id,
@@ -133,7 +228,7 @@ export function normalizeArtifact(value: unknown, fallbackThreadId?: string): Or
     createdAt,
     ...(status ? { status } : {}),
     ...(links.length > 0 ? { links } : {}),
-    ...(metadata ? { metadata } : {}),
+    ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
   };
 }
 

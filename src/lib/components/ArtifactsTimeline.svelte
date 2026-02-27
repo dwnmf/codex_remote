@@ -27,6 +27,12 @@
       minute: "2-digit",
     });
   }
+
+  function artifactPaths(artifact: OrbitArtifact): string[] {
+    const maybePaths = artifact.metadata?.paths;
+    if (!Array.isArray(maybePaths)) return [];
+    return maybePaths.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+  }
 </script>
 
 <section class="artifacts-panel stack" aria-live="polite">
@@ -65,6 +71,13 @@
               <span class="meta-chip status">{artifact.status}</span>
             {/if}
           </div>
+          {#if artifactPaths(artifact).length > 0}
+            <div class="artifact-paths row">
+              {#each artifactPaths(artifact) as path (path)}
+                <code class="path-chip">{path}</code>
+              {/each}
+            </div>
+          {/if}
           {#if artifact.summary}
             <p class="artifact-summary">{artifact.summary}</p>
           {/if}
@@ -213,6 +226,23 @@
     font-family: var(--font-sans);
     font-size: 0.84rem;
     line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  .artifact-paths {
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+  }
+
+  .path-chip {
+    margin: 0;
+    padding: 0.14rem 0.4rem;
+    border: 1px solid color-mix(in srgb, var(--cli-border) 66%, transparent);
+    border-radius: 999px;
+    color: var(--cli-text);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    background: color-mix(in srgb, var(--cli-bg-elevated) 75%, transparent);
   }
 
   .artifact-links {
