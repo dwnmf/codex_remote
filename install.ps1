@@ -285,7 +285,8 @@ Write-Host ""
 Write-Host "Codex Remote Installer (Windows)" -ForegroundColor Cyan
 Write-Host ""
 
-if (-not $IsWindows) {
+$runningOnWindows = $env:OS -eq "Windows_NT"
+if (-not $runningOnWindows) {
   Abort "install.ps1 is for Windows. Use install.sh on Linux/macOS."
 }
 Write-Pass "Windows detected"
