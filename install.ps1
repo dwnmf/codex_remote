@@ -64,21 +64,25 @@ function Invoke-Retry([int]$Attempts, [int]$DelaySeconds, [string]$Description, 
 }
 
 function Ensure-EnvFile([string]$HomePath) {
-  $envFile = Join-Path $HomePath ".env"
+  if ([string]::IsNullOrWhiteSpace($HomePath)) {
+    Abort "Internal error: CODEX_REMOTE_HOME resolved to an empty path."
+  }
+
+  $resolvedHome = $HomePath.Trim()
+  if (-not (Test-Path $resolvedHome)) {
+    New-Item -ItemType Directory -Path $resolvedHome -Force | Out-Null
+  }
+
+  $envFile = Join-Path $resolvedHome ".env"
   if (Test-Path $envFile) {
     return
   }
 
-  $exampleCandidates = @((Join-Path $HomePath ".env.example"))
-  if ($PSScriptRoot) {
-    $exampleCandidates += (Join-Path $PSScriptRoot ".env.example")
-  }
-  foreach ($example in $exampleCandidates) {
-    if (Test-Path $example) {
-      Copy-Item $example $envFile -Force
-      Write-Pass "Created .env from $example"
-      return
-    }
+  $example = Join-Path $resolvedHome ".env.example"
+  if (Test-Path $example) {
+    Copy-Item $example $envFile -Force
+    Write-Pass "Created .env from $example"
+    return
   }
 
   @(
