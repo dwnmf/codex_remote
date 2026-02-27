@@ -4,8 +4,22 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$script:CodexRemoteHome = if ($env:CODEX_REMOTE_HOME) { $env:CODEX_REMOTE_HOME } else { Split-Path -Parent $script:ScriptDir }
+$script:RepoRoot = Split-Path -Parent $script:ScriptDir
+$defaultHome = Join-Path $HOME ".codex-remote"
+$script:CodexRemoteHome = if ($env:CODEX_REMOTE_HOME) {
+  $env:CODEX_REMOTE_HOME
+}
+elseif (Test-Path (Join-Path $defaultHome "services/anchor")) {
+  $defaultHome
+}
+elseif (Test-Path (Join-Path $script:RepoRoot "services/anchor")) {
+  $script:RepoRoot
+}
+else {
+  $defaultHome
+}
 $script:AnchorDir = Join-Path $script:CodexRemoteHome "services/anchor"
+$script:AnchorBinary = Join-Path $script:AnchorDir "bin/codex-remote-anchor.exe"
 $script:EnvFile = Join-Path $script:CodexRemoteHome ".env"
 $script:CredentialsFile = Join-Path $script:CodexRemoteHome "credentials.json"
 
@@ -25,8 +39,98 @@ function Write-InfoLine([string]$Message) {
   Write-Host "  $Message"
 }
 
+function Get-DefaultEnvContent() {
+  return @(
+    "# Codex Remote Anchor Configuration (self-host)"
+    "# Run 'codex-remote self-host' to complete setup."
+    "ANCHOR_PORT=8788"
+    "ANCHOR_ORBIT_URL="
+    "AUTH_URL="
+    "AUTH_MODE=passkey"
+    "VAPID_PUBLIC_KEY="
+    "ANCHOR_JWT_TTL_SEC=300"
+    "ANCHOR_APP_CWD="
+    "D1_DATABASE_ID="
+  ) -join "`n"
+}
+
+function Ensure-EnvFile([switch]$Silent) {
+  if (Test-Path $script:EnvFile) {
+    return
+  }
+
+  $envDir = Split-Path -Parent $script:EnvFile
+  if (-not (Test-Path $envDir)) {
+    New-Item -ItemType Directory -Force -Path $envDir | Out-Null
+  }
+
+  $candidates = @(
+    (Join-Path $script:CodexRemoteHome ".env.example"),
+    (Join-Path $script:RepoRoot ".env.example"),
+    (Join-Path $script:ScriptDir ".env.example")
+  )
+
+  foreach ($example in $candidates) {
+    if (Test-Path $example) {
+      Copy-Item $example $script:EnvFile -Force
+      if (-not $Silent) {
+        Write-InfoLine "Created .env from $example"
+      }
+      return
+    }
+  }
+
+  Set-Content -Path $script:EnvFile -Value (Get-DefaultEnvContent)
+  if (-not $Silent) {
+    Write-WarnLine ".env.example not found; created a minimal .env at $script:EnvFile"
+  }
+}
+
 function Test-Tool([string]$Name) {
   return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Read-EnvFileMap([string]$Path) {
+  $map = @{}
+  if (-not (Test-Path $Path)) {
+    return $map
+  }
+
+  foreach ($line in Get-Content $Path) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+      continue
+    }
+    $idx = $trimmed.IndexOf("=")
+    if ($idx -lt 1) {
+      continue
+    }
+    $key = $trimmed.Substring(0, $idx).Trim()
+    if (-not $key) {
+      continue
+    }
+    $value = $trimmed.Substring($idx + 1)
+    if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+      if ($value.Length -ge 2) {
+        $value = $value.Substring(1, $value.Length - 2)
+      }
+    }
+    $map[$key] = $value
+  }
+
+  return $map
+}
+
+function Assert-AnchorRuntime() {
+  $hasBinary = Test-Path $script:AnchorBinary
+  $hasSource = Test-Path (Join-Path $script:AnchorDir "src/index.ts")
+
+  if (-not $hasBinary -and -not $hasSource) {
+    throw "Anchor runtime not found. Expected binary at $script:AnchorBinary or source at $script:AnchorDir"
+  }
+  if (-not $hasBinary -and -not (Test-Tool "bun")) {
+    throw "bun is not installed and no compiled anchor binary was found."
+  }
 }
 
 function Get-EnvValue([string]$Name, [string]$DefaultValue = "") {
@@ -93,30 +197,52 @@ function Invoke-WithEnv([hashtable]$Vars, [scriptblock]$Action) {
 }
 
 function Assert-PrereqsForRun() {
-  if (-not (Test-Tool "bun")) {
-    throw "bun is not installed. Run 'codex-remote doctor' for details."
+  Ensure-EnvFile -Silent
+  Assert-AnchorRuntime
+}
+
+function Invoke-Anchor([bool]$ForceLogin) {
+  Assert-PrereqsForRun
+
+  $envVars = Read-EnvFileMap $script:EnvFile
+  $previous = @{}
+  foreach ($key in $envVars.Keys) {
+    $previous[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
+    [Environment]::SetEnvironmentVariable($key, [string]$envVars[$key], "Process")
   }
-  if (-not (Test-Path $script:EnvFile)) {
-    throw "$script:EnvFile not found. Run the installer first."
+
+  $previous["CODEX_REMOTE_CREDENTIALS_FILE"] = [Environment]::GetEnvironmentVariable("CODEX_REMOTE_CREDENTIALS_FILE", "Process")
+  $previous["CODEX_REMOTE_FORCE_LOGIN"] = [Environment]::GetEnvironmentVariable("CODEX_REMOTE_FORCE_LOGIN", "Process")
+  [Environment]::SetEnvironmentVariable("CODEX_REMOTE_CREDENTIALS_FILE", $script:CredentialsFile, "Process")
+  [Environment]::SetEnvironmentVariable("CODEX_REMOTE_FORCE_LOGIN", (if ($ForceLogin) { "1" } else { "" }), "Process")
+
+  $exitCode = 0
+  try {
+    if (Test-Path $script:AnchorBinary) {
+      & $script:AnchorBinary
+    }
+    else {
+      & bun "--env-file" $script:EnvFile (Join-Path $script:AnchorDir "src/index.ts")
+    }
+    $exitCode = $LASTEXITCODE
   }
-  if (-not (Test-Path (Join-Path $script:AnchorDir "src/index.ts"))) {
-    throw "Anchor service not found at $script:AnchorDir"
+  finally {
+    foreach ($key in $envVars.Keys) {
+      [Environment]::SetEnvironmentVariable($key, $previous[$key], "Process")
+    }
+    [Environment]::SetEnvironmentVariable("CODEX_REMOTE_CREDENTIALS_FILE", $previous["CODEX_REMOTE_CREDENTIALS_FILE"], "Process")
+    [Environment]::SetEnvironmentVariable("CODEX_REMOTE_FORCE_LOGIN", $previous["CODEX_REMOTE_FORCE_LOGIN"], "Process")
   }
+
+  exit $exitCode
 }
 
 function Cmd-Start() {
-  Assert-PrereqsForRun
-  $env:CODEX_REMOTE_CREDENTIALS_FILE = $script:CredentialsFile
-  & bun "--env-file" $script:EnvFile (Join-Path $script:AnchorDir "src/index.ts")
-  exit $LASTEXITCODE
+  Invoke-Anchor $false
 }
 
 function Cmd-Login() {
-  Assert-PrereqsForRun
-  $env:CODEX_REMOTE_FORCE_LOGIN = "1"
-  $env:CODEX_REMOTE_CREDENTIALS_FILE = $script:CredentialsFile
-  & bun "--env-file" $script:EnvFile (Join-Path $script:AnchorDir "src/index.ts")
-  exit $LASTEXITCODE
+  Invoke-Anchor $true
 }
 
 function Cmd-Doctor() {
@@ -147,8 +273,13 @@ function Cmd-Doctor() {
     Write-Pass "bun $bunVersion"
   }
   else {
-    Write-Fail "bun not installed"
-    $hasError = $true
+    if (Test-Path $script:AnchorBinary) {
+      Write-InfoLine "bun not installed (using compiled anchor binary)"
+    }
+    else {
+      Write-Fail "bun not installed"
+      $hasError = $true
+    }
   }
 
   if (Test-Tool "codex") {
@@ -159,15 +290,21 @@ function Cmd-Doctor() {
     $hasError = $true
   }
 
-  if (Test-Path (Join-Path $script:AnchorDir "src/index.ts")) {
-    Write-Pass "Anchor service found"
+  if (Test-Path $script:AnchorBinary) {
+    Write-Pass "Anchor binary found ($script:AnchorBinary)"
+  }
+  elseif (Test-Path (Join-Path $script:AnchorDir "src/index.ts")) {
+    Write-Pass "Anchor source found"
   }
   else {
-    Write-Fail "Anchor service not found at $script:AnchorDir"
+    Write-Fail "Anchor runtime not found at $script:AnchorDir"
     $hasError = $true
   }
 
-  if (Test-Path (Join-Path $script:AnchorDir "node_modules")) {
+  if (Test-Path $script:AnchorBinary) {
+    Write-InfoLine "Anchor dependencies are bundled in binary mode"
+  }
+  elseif (Test-Path (Join-Path $script:AnchorDir "node_modules")) {
     Write-Pass "Anchor dependencies installed"
   }
   else {
@@ -211,9 +348,7 @@ function Cmd-Doctor() {
 }
 
 function Cmd-Config() {
-  if (-not (Test-Path $script:EnvFile)) {
-    throw "No .env file found at $script:EnvFile"
-  }
+  Ensure-EnvFile
 
   $editor = if ($env:EDITOR) { $env:EDITOR } else { "notepad" }
   & $editor $script:EnvFile
@@ -223,7 +358,7 @@ function Cmd-Update() {
   Write-Host "Updating Codex Remote..."
 
   if (-not (Test-Path (Join-Path $script:CodexRemoteHome ".git"))) {
-    throw "$script:CodexRemoteHome is not a git repository."
+    throw "$script:CodexRemoteHome is not a git repository. Re-run install.ps1 to update release installs."
   }
 
   $before = (& git -C $script:CodexRemoteHome rev-parse --short HEAD 2>$null).Trim()
@@ -405,6 +540,11 @@ function Cmd-Version() {
     $tag = (& git -C $script:CodexRemoteHome describe --tags --always 2>$null).Trim()
     if (-not $tag) { $tag = "dev" }
     Write-Host "codex-remote $tag"
+  }
+  elseif (Test-Path (Join-Path $script:CodexRemoteHome "VERSION")) {
+    $version = (Get-Content (Join-Path $script:CodexRemoteHome "VERSION") -Raw).Trim()
+    if (-not $version) { $version = "release" }
+    Write-Host "codex-remote $version"
   }
   else {
     Write-Host "codex-remote dev"

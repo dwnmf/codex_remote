@@ -5,14 +5,18 @@ $ErrorActionPreference = "Stop"
 
 $script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:RepoRoot = Split-Path -Parent $script:ScriptDir
+$defaultHome = Join-Path $HOME ".codex-remote"
 $script:CodexRemoteHome = if ($env:CODEX_REMOTE_HOME) {
   $env:CODEX_REMOTE_HOME
+}
+elseif (Test-Path (Join-Path $defaultHome "services/orbit")) {
+  $defaultHome
 }
 elseif (Test-Path (Join-Path $script:RepoRoot "services/orbit")) {
   $script:RepoRoot
 }
 else {
-  Join-Path $HOME ".codex-remote"
+  $defaultHome
 }
 $script:EnvFile = Join-Path $script:CodexRemoteHome ".env"
 $script:OrbitDir = Join-Path $script:CodexRemoteHome "services/orbit"
@@ -39,6 +43,29 @@ function Abort([string]$Message) {
 
 function Test-Tool([string]$Name) {
   return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Refresh-PathForBunGlobalTools() {
+  $bunGlobalBin = ""
+  try {
+    $bunGlobalBin = ((& bun pm bin -g 2>$null) | Select-Object -First 1).Trim()
+  }
+  catch {
+    return
+  }
+
+  if (-not $bunGlobalBin) {
+    return
+  }
+
+  $entries = ($env:Path -split ";") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+  $normalizedTarget = $bunGlobalBin.TrimEnd('\').ToLowerInvariant()
+  $hasEntry = $entries | Where-Object { $_.TrimEnd('\').ToLowerInvariant() -eq $normalizedTarget }
+  if (-not $hasEntry) {
+    $env:Path = "$bunGlobalBin;$env:Path"
+  }
+
+  $ExecutionContext.SessionState.Applications.Clear()
 }
 
 function Confirm-Yes([string]$Prompt) {
@@ -309,6 +336,7 @@ if (-not (Test-Tool "wrangler")) {
   Write-WarnLine "wrangler not found"
   if (Confirm-Yes "Install wrangler globally via bun?") {
     Invoke-Retry 3 3 "wrangler install" { & bun add -g wrangler }
+    Refresh-PathForBunGlobalTools
   }
   else {
     Abort "wrangler is required. Run: bun add -g wrangler"

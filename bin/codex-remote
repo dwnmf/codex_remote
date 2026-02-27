@@ -2,7 +2,17 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")")" && pwd)"
-CODEX_REMOTE_HOME="${CODEX_REMOTE_HOME:-$(dirname "$SCRIPT_DIR")}"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+DEFAULT_HOME="${HOME}/.codex-remote"
+if [[ -n "${CODEX_REMOTE_HOME:-}" ]]; then
+  CODEX_REMOTE_HOME="$CODEX_REMOTE_HOME"
+elif [[ -d "$DEFAULT_HOME/services/anchor" ]]; then
+  CODEX_REMOTE_HOME="$DEFAULT_HOME"
+elif [[ -d "$REPO_ROOT/services/anchor" ]]; then
+  CODEX_REMOTE_HOME="$REPO_ROOT"
+else
+  CODEX_REMOTE_HOME="$DEFAULT_HOME"
+fi
 ANCHOR_DIR="$CODEX_REMOTE_HOME/services/anchor"
 ENV_FILE="$CODEX_REMOTE_HOME/.env"
 CREDENTIALS_FILE="$CODEX_REMOTE_HOME/credentials.json"
@@ -19,6 +29,38 @@ pass() { printf "  ${GREEN}✓${RESET} %s\n" "$1"; }
 fail() { printf "  ${RED}✗${RESET} %s\n" "$1"; }
 warn() { printf "  ${YELLOW}⚠${RESET} %s\n" "$1"; }
 info() { printf "  %s\n" "$1"; }
+
+default_env_content() {
+  cat <<'EOF'
+# Codex Remote Anchor Configuration (self-host)
+# Run 'codex-remote self-host' to complete setup.
+ANCHOR_PORT=8788
+ANCHOR_ORBIT_URL=
+AUTH_URL=
+AUTH_MODE=passkey
+VAPID_PUBLIC_KEY=
+ANCHOR_JWT_TTL_SEC=300
+ANCHOR_APP_CWD=
+D1_DATABASE_ID=
+EOF
+}
+
+ensure_env_file() {
+  if [[ -f "$ENV_FILE" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$CODEX_REMOTE_HOME"
+  local example
+  for example in "$CODEX_REMOTE_HOME/.env.example" "$REPO_ROOT/.env.example" "$SCRIPT_DIR/.env.example"; do
+    if [[ -f "$example" ]]; then
+      cp "$example" "$ENV_FILE"
+      return 0
+    fi
+  done
+
+  default_env_content > "$ENV_FILE"
+}
 
 wrangler_tty() {
   if [[ -r /dev/tty ]]; then
@@ -86,10 +128,7 @@ cmd_start() {
     exit 1
   fi
 
-  if [[ ! -f "$ENV_FILE" ]]; then
-    echo "Error: $ENV_FILE not found. Run the install script or create it from .env.example."
-    exit 1
-  fi
+  ensure_env_file
 
   if [[ ! -f "$ANCHOR_DIR/src/index.ts" ]]; then
     echo "Error: Anchor service not found at $ANCHOR_DIR"
@@ -105,10 +144,7 @@ cmd_login() {
     exit 1
   fi
 
-  if [[ ! -f "$ENV_FILE" ]]; then
-    echo "Error: $ENV_FILE not found. Run the install script first."
-    exit 1
-  fi
+  ensure_env_file
 
   if [[ ! -f "$ANCHOR_DIR/src/index.ts" ]]; then
     echo "Error: Anchor service not found at $ANCHOR_DIR"
@@ -218,11 +254,7 @@ cmd_doctor() {
 }
 
 cmd_config() {
-  if [[ ! -f "$ENV_FILE" ]]; then
-    echo "No .env file found at $ENV_FILE"
-    echo "Run the install script to create one, or copy from .env.example"
-    exit 1
-  fi
+  ensure_env_file
 
   local editor="${EDITOR:-nano}"
   exec "$editor" "$ENV_FILE"

@@ -1,0 +1,80 @@
+name: release-windows
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing git tag to release (e.g. v1.2.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+      RELEASE_ASSET_NAME: codex-remote-windows-x64.zip
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout requested tag
+        if: github.event_name == 'workflow_dispatch'
+        run: git checkout "${{ github.event.inputs.tag }}"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build anchor binary
+        run: bun build services/anchor/src/index.ts --compile --outfile services/anchor/bin/codex-remote-anchor.exe
+
+      - name: Package windows runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $staging = Join-Path $env:RUNNER_TEMP "codex-remote-windows-x64"
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+
+          $tracked = git ls-files
+          foreach ($relative in $tracked) {
+            $source = Join-Path $PWD $relative
+            if (-not (Test-Path $source -PathType Leaf)) {
+              continue
+            }
+            $destination = Join-Path $staging $relative
+            $destinationDir = Split-Path -Parent $destination
+            if ($destinationDir) {
+              New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+            }
+            Copy-Item -Path $source -Destination $destination -Force
+          }
+
+          $anchorExeSource = Join-Path $PWD "services/anchor/bin/codex-remote-anchor.exe"
+          $anchorExeDestination = Join-Path $staging "services/anchor/bin/codex-remote-anchor.exe"
+          New-Item -ItemType Directory -Path (Split-Path -Parent $anchorExeDestination) -Force | Out-Null
+          Copy-Item -Path $anchorExeSource -Destination $anchorExeDestination -Force
+
+          Set-Content -Path (Join-Path $staging "VERSION") -Value $env:RELEASE_TAG -NoNewline
+
+          $zipPath = Join-Path $env:RUNNER_TEMP $env:RELEASE_ASSET_NAME
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $zipPath -Force
+
+          $hash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path "${zipPath}.sha256" -Value "$hash  $env:RELEASE_ASSET_NAME"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: |
+            ${{ runner.temp }}/${{ env.RELEASE_ASSET_NAME }}
+            ${{ runner.temp }}/${{ env.RELEASE_ASSET_NAME }}.sha256

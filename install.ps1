@@ -4,8 +4,13 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $CodexRemoteHome = if ($env:CODEX_REMOTE_HOME) { $env:CODEX_REMOTE_HOME } else { Join-Path $HOME ".codex-remote" }
-$CodexRemoteRepo = if ($env:CODEX_REMOTE_REPO) { $env:CODEX_REMOTE_REPO } else { "https://github.com/cospec-ai/codex-remote.git" }
+$CodexRemoteRepo = if ($env:CODEX_REMOTE_REPO) { $env:CODEX_REMOTE_REPO } else { "https://github.com/dwnmf/codex_remote.git" }
 $CodexRemoteBranch = if ($env:CODEX_REMOTE_BRANCH) { $env:CODEX_REMOTE_BRANCH } else { "" }
+$InstallModeRaw = if ($env:CODEX_REMOTE_INSTALL_MODE) { $env:CODEX_REMOTE_INSTALL_MODE } else { "auto" }
+$InstallMode = $InstallModeRaw.ToLowerInvariant()
+$ReleaseAssetName = if ($env:CODEX_REMOTE_RELEASE_ASSET) { $env:CODEX_REMOTE_RELEASE_ASSET } else { "codex-remote-windows-x64.zip" }
+$ReleaseTag = if ($env:CODEX_REMOTE_RELEASE_TAG) { $env:CODEX_REMOTE_RELEASE_TAG } else { "" }
+$RunSelfHost = $env:CODEX_REMOTE_RUN_SELF_HOST -eq "1"
 
 function Write-Step([string]$Message) {
   Write-Host ""
@@ -22,12 +27,6 @@ function Write-WarnLine([string]$Message) {
 
 function Abort([string]$Message) {
   throw $Message
-}
-
-function Confirm-Yes([string]$Prompt) {
-  $answer = Read-Host "$Prompt [Y/n]"
-  if (-not $answer) { return $true }
-  return $answer -match "^[Yy]"
 }
 
 function Test-Tool([string]$Name) {
@@ -60,11 +59,16 @@ function Ensure-EnvFile([string]$HomePath) {
     return
   }
 
-  $example = Join-Path $HomePath ".env.example"
-  if (Test-Path $example) {
-    Copy-Item $example $envFile
-    Write-Pass "Created .env from .env.example"
-    return
+  $exampleCandidates = @(
+    (Join-Path $HomePath ".env.example"),
+    (Join-Path $PSScriptRoot ".env.example")
+  )
+  foreach ($example in $exampleCandidates) {
+    if (Test-Path $example) {
+      Copy-Item $example $envFile -Force
+      Write-Pass "Created .env from $example"
+      return
+    }
   }
 
   @(
@@ -73,26 +77,13 @@ function Ensure-EnvFile([string]$HomePath) {
     "ANCHOR_PORT=8788"
     "ANCHOR_ORBIT_URL="
     "AUTH_URL="
+    "AUTH_MODE=passkey"
+    "VAPID_PUBLIC_KEY="
     "ANCHOR_JWT_TTL_SEC=300"
     "ANCHOR_APP_CWD="
+    "D1_DATABASE_ID="
   ) | Set-Content $envFile
   Write-WarnLine ".env.example not found; created a minimal .env file."
-}
-
-function Update-DatabaseIdToml([string]$TomlPath, [string]$DatabaseId) {
-  if (-not (Test-Path $TomlPath)) {
-    return
-  }
-
-  $content = Get-Content $TomlPath -Raw
-  $pattern = 'database_id\s*=\s*"[^"]*"'
-  if (-not [regex]::IsMatch($content, $pattern)) {
-    throw "Failed to update database_id in $TomlPath"
-  }
-  $updated = [regex]::Replace($content, $pattern, "database_id = `"$DatabaseId`"", 1)
-  if ($updated -ne $content) {
-    Set-Content -Path $TomlPath -Value $updated -NoNewline
-  }
 }
 
 function Ensure-Path([string]$TargetDir) {
@@ -118,6 +109,178 @@ function Ensure-Path([string]$TargetDir) {
   }
 }
 
+function Ensure-CommandViaWinget([string]$CommandName, [string]$WingetId, [string]$ManualHint) {
+  if (Test-Tool $CommandName) {
+    return
+  }
+
+  if (-not (Test-Tool "winget")) {
+    Abort "$CommandName is required. $ManualHint"
+  }
+
+  Write-WarnLine "$CommandName not found."
+  Write-Host "  Installing $CommandName with winget..."
+  & winget install --id $WingetId -e --source winget
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Tool $CommandName)) {
+    Abort "Failed to install $CommandName. $ManualHint"
+  }
+
+  Write-Pass "$CommandName installed"
+}
+
+function Get-RepoSlug([string]$RepoUrl) {
+  $trimmed = $RepoUrl.Trim()
+  if ($trimmed -match "github\.com[:/](?<owner>[^/]+)/(?<repo>[^/\.\s]+)(?:\.git)?/?$") {
+    return "$($Matches.owner)/$($Matches.repo)"
+  }
+  Abort "Could not parse GitHub repository from CODEX_REMOTE_REPO: $RepoUrl"
+}
+
+function Get-ReleaseAssetDownloadUrl([string]$RepoUrl, [string]$AssetName, [string]$Tag) {
+  $slug = Get-RepoSlug $RepoUrl
+  $apiUrl = if ($Tag) {
+    "https://api.github.com/repos/$slug/releases/tags/$Tag"
+  }
+  else {
+    "https://api.github.com/repos/$slug/releases/latest"
+  }
+
+  $headers = @{
+    "Accept" = "application/vnd.github+json"
+    "User-Agent" = "codex-remote-installer"
+  }
+
+  $release = Invoke-RestMethod -Method Get -Uri $apiUrl -Headers $headers
+  $asset = @($release.assets) | Where-Object { $_.name -eq $AssetName } | Select-Object -First 1
+  if (-not $asset) {
+    $available = (@($release.assets) | ForEach-Object { $_.name }) -join ", "
+    Abort "Release asset '$AssetName' not found in $slug release '$($release.tag_name)'. Available: $available"
+  }
+
+  return [string]$asset.browser_download_url
+}
+
+function Install-FromSource([string]$HomePath, [string]$RepoUrl, [string]$Branch) {
+  Ensure-CommandViaWinget "git" "Git.Git" "Install it and rerun this script."
+  Ensure-CommandViaWinget "bun" "Oven-sh.Bun" "Install bun from https://bun.sh and rerun."
+
+  if (Test-Path (Join-Path $HomePath ".git")) {
+    Write-Host "  Existing source installation found. Updating..."
+
+    $localStatus = (& git -C $HomePath status --porcelain).Trim()
+    if ($localStatus) {
+      Write-WarnLine "Local changes detected and will be overwritten."
+    }
+
+    Invoke-Retry 3 3 "git fetch" { & git -C $HomePath fetch --prune origin }
+
+    $targetBranch = $Branch
+    if (-not $targetBranch) {
+      $remoteHead = (& git -C $HomePath symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null).Trim()
+      $targetBranch = if ($remoteHead) { $remoteHead -replace "^origin/", "" } else { "main" }
+    }
+
+    & git -C $HomePath show-ref --verify --quiet "refs/remotes/origin/$targetBranch"
+    if ($LASTEXITCODE -ne 0) {
+      Abort "Remote branch origin/$targetBranch not found."
+    }
+
+    $before = (& git -C $HomePath rev-parse --short HEAD 2>$null).Trim()
+    if (-not $before) { $before = "unknown" }
+
+    & git -C $HomePath reset --hard --quiet "origin/$targetBranch"
+    if ($LASTEXITCODE -ne 0) {
+      Abort "Failed to reset repository."
+    }
+    & git -C $HomePath clean -fd --quiet
+    if ($LASTEXITCODE -ne 0) {
+      Abort "Failed to clean repository."
+    }
+
+    $after = (& git -C $HomePath rev-parse --short HEAD 2>$null).Trim()
+    if (-not $after) { $after = "unknown" }
+    Write-Pass "Updated $before -> $after (origin/$targetBranch)"
+  }
+  else {
+    if (Test-Path $HomePath) {
+      $backup = "$HomePath.bak.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+      Write-WarnLine "$HomePath exists but is not a git repo. Backing up to $backup"
+      Move-Item $HomePath $backup
+    }
+
+    if ($Branch) {
+      Invoke-Retry 3 3 "git clone" { & git clone --depth 1 --branch $Branch $RepoUrl $HomePath }
+    }
+    else {
+      Invoke-Retry 3 3 "git clone" { & git clone --depth 1 $RepoUrl $HomePath }
+    }
+    Write-Pass "Cloned repository"
+  }
+
+  Write-Host "  Installing anchor dependencies..."
+  Invoke-Retry 3 3 "Anchor dependency install" {
+    Push-Location (Join-Path $HomePath "services/anchor")
+    try {
+      & bun install --silent
+    }
+    finally {
+      Pop-Location
+    }
+  }
+  Write-Pass "Anchor dependencies installed"
+}
+
+function Install-FromRelease([string]$HomePath, [string]$RepoUrl, [string]$AssetName, [string]$Tag) {
+  $downloadUrl = Get-ReleaseAssetDownloadUrl -RepoUrl $RepoUrl -AssetName $AssetName -Tag $Tag
+  Write-Host "  Downloading release asset: $AssetName"
+
+  if (Test-Path $HomePath) {
+    $backup = "$HomePath.bak.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+    Write-WarnLine "$HomePath exists. Backing up to $backup"
+    Move-Item $HomePath $backup
+  }
+  New-Item -ItemType Directory -Path $HomePath -Force | Out-Null
+
+  $tmpZip = Join-Path $env:TEMP ("codex-remote-release-" + [guid]::NewGuid().ToString("N") + ".zip")
+  $tmpExtract = Join-Path $env:TEMP ("codex-remote-release-" + [guid]::NewGuid().ToString("N"))
+  New-Item -ItemType Directory -Path $tmpExtract -Force | Out-Null
+
+  try {
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpZip
+    Expand-Archive -Path $tmpZip -DestinationPath $tmpExtract -Force
+
+    $contentRoot = $tmpExtract
+    $entries = @(Get-ChildItem -Path $tmpExtract -Force)
+    if ($entries.Count -eq 1 -and $entries[0].PSIsContainer) {
+      $candidateRoot = $entries[0].FullName
+      if (Test-Path (Join-Path $candidateRoot "bin/codex-remote.ps1")) {
+        $contentRoot = $candidateRoot
+      }
+    }
+
+    Get-ChildItem -Path $contentRoot -Force | ForEach-Object {
+      Copy-Item -Path $_.FullName -Destination (Join-Path $HomePath $_.Name) -Recurse -Force
+    }
+  }
+  finally {
+    if (Test-Path $tmpZip) { Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $tmpExtract) { Remove-Item $tmpExtract -Recurse -Force -ErrorAction SilentlyContinue }
+  }
+
+  $requiredPaths = @(
+    (Join-Path $HomePath "bin/codex-remote.ps1"),
+    (Join-Path $HomePath "bin/codex-remote.cmd"),
+    (Join-Path $HomePath "services/anchor/bin/codex-remote-anchor.exe")
+  )
+  foreach ($required in $requiredPaths) {
+    if (-not (Test-Path $required)) {
+      Abort "Release package is invalid: missing $required"
+    }
+  }
+
+  Write-Pass "Installed from release asset ($AssetName)"
+}
+
 Write-Host ""
 Write-Host "Codex Remote Installer (Windows)" -ForegroundColor Cyan
 Write-Host ""
@@ -127,61 +290,56 @@ if (-not $IsWindows) {
 }
 Write-Pass "Windows detected"
 
+if ($InstallMode -notin @("auto", "source", "release")) {
+  Abort "Invalid CODEX_REMOTE_INSTALL_MODE='$InstallModeRaw'. Allowed values: auto, source, release."
+}
+
 Write-Step "Checking prerequisites..."
 
-if (Test-Tool "git") {
-  Write-Pass "git installed"
+if (Test-Tool "winget") {
+  Write-Pass "winget installed"
 }
 else {
-  Write-WarnLine "git not found."
-  if ((Test-Tool "winget") -and (Confirm-Yes "Install Git with winget?")) {
-    & winget install --id Git.Git -e --source winget
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Tool "git")) {
-      Abort "Failed to install git."
-    }
+  Write-WarnLine "winget not found (installer will not auto-install missing tools)."
+}
+
+$hasGit = Test-Tool "git"
+$hasBun = Test-Tool "bun"
+$selectedMode = switch ($InstallMode) {
+  "source" { "source" }
+  "release" { "release" }
+  default {
+    if ($hasGit -and $hasBun) { "source" } else { "release" }
+  }
+}
+
+if ($selectedMode -eq "source") {
+  if ($hasGit) {
     Write-Pass "git installed"
   }
+  if ($hasBun) {
+    $bunVersion = & bun --version
+    Write-Pass "bun $bunVersion"
+  }
+}
+else {
+  if ($hasGit) {
+    Write-Pass "git installed (optional in release mode)"
+  }
   else {
-    Abort "git is required. Install it and rerun this script."
+    Write-Host "  git not required in release mode"
+  }
+
+  if ($hasBun) {
+    $bunVersion = & bun --version
+    Write-Pass "bun $bunVersion (optional in release mode)"
+  }
+  else {
+    Write-Host "  bun not required in release mode"
   }
 }
 
-if (Test-Tool "bun") {
-  $bunVersion = & bun --version
-  Write-Pass "bun $bunVersion"
-}
-else {
-  Write-WarnLine "bun not found."
-  if ((Test-Tool "winget") -and (Confirm-Yes "Install bun with winget?")) {
-    & winget install --id Oven-sh.Bun -e --source winget
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Tool "bun")) {
-      Abort "Failed to install bun."
-    }
-    Write-Pass "bun installed"
-  }
-  else {
-    Abort "bun is required. Install it from https://bun.sh and rerun."
-  }
-}
-
-if (Test-Tool "codex") {
-  Write-Pass "codex CLI installed"
-}
-else {
-  Write-WarnLine "codex CLI not found."
-  if ((Test-Tool "winget") -and (Confirm-Yes "Try install codex with winget?")) {
-    & winget install --id OpenAI.Codex -e --source winget
-    if ($LASTEXITCODE -eq 0 -and (Test-Tool "codex")) {
-      Write-Pass "codex installed"
-    }
-    else {
-      Abort "codex is required. Install manually: https://github.com/openai/codex"
-    }
-  }
-  else {
-    Abort "codex is required. Install manually: https://github.com/openai/codex"
-  }
-}
+Ensure-CommandViaWinget "codex" "OpenAI.Codex" "Install manually: https://github.com/openai/codex"
 
 Write-Host ""
 Write-Host "  Checking codex authentication..."
@@ -190,88 +348,28 @@ if ($LASTEXITCODE -eq 0) {
   Write-Pass "codex authenticated"
 }
 else {
-  Write-WarnLine "codex is not authenticated"
-  if (Confirm-Yes "Run 'codex login' now?") {
-    & codex login
-    & codex login status > $null 2>&1
-    if ($LASTEXITCODE -eq 0) {
-      Write-Pass "codex authenticated"
-    }
-    else {
-      Write-WarnLine "codex authentication may have failed. Continue anyway."
-    }
+  Write-WarnLine "codex is not authenticated. Launching 'codex login'..."
+  & codex login
+  & codex login status > $null 2>&1
+  if ($LASTEXITCODE -eq 0) {
+    Write-Pass "codex authenticated"
+  }
+  else {
+    Abort "codex authentication failed. Complete login and rerun installer."
   }
 }
 
 Write-Step "Installing Codex Remote to $CodexRemoteHome..."
+Write-Host "  Install mode: $selectedMode"
 
-if (Test-Path (Join-Path $CodexRemoteHome ".git")) {
-  Write-Host "  Existing installation found. Updating..."
-
-  $localStatus = (& git -C $CodexRemoteHome status --porcelain).Trim()
-  if ($localStatus) {
-    Write-WarnLine "Local changes detected and will be overwritten."
-  }
-
-  Invoke-Retry 3 3 "git fetch" { & git -C $CodexRemoteHome fetch --prune origin }
-
-  $targetBranch = $CodexRemoteBranch
-  if (-not $targetBranch) {
-    $remoteHead = (& git -C $CodexRemoteHome symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>$null).Trim()
-    $targetBranch = if ($remoteHead) { $remoteHead -replace "^origin/", "" } else { "main" }
-  }
-
-  & git -C $CodexRemoteHome show-ref --verify --quiet "refs/remotes/origin/$targetBranch"
-  if ($LASTEXITCODE -ne 0) {
-    Abort "Remote branch origin/$targetBranch not found."
-  }
-
-  $before = (& git -C $CodexRemoteHome rev-parse --short HEAD 2>$null).Trim()
-  if (-not $before) { $before = "unknown" }
-
-  & git -C $CodexRemoteHome reset --hard --quiet "origin/$targetBranch"
-  if ($LASTEXITCODE -ne 0) {
-    Abort "Failed to reset repository."
-  }
-  & git -C $CodexRemoteHome clean -fd --quiet
-  if ($LASTEXITCODE -ne 0) {
-    Abort "Failed to clean repository."
-  }
-
-  $after = (& git -C $CodexRemoteHome rev-parse --short HEAD 2>$null).Trim()
-  if (-not $after) { $after = "unknown" }
-  Write-Pass "Updated $before -> $after (origin/$targetBranch)"
+if ($selectedMode -eq "source") {
+  Install-FromSource -HomePath $CodexRemoteHome -RepoUrl $CodexRemoteRepo -Branch $CodexRemoteBranch
 }
 else {
-  if (Test-Path $CodexRemoteHome) {
-    $backup = "$CodexRemoteHome.bak.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
-    Write-WarnLine "$CodexRemoteHome exists but is not a git repo. Backing up to $backup"
-    Move-Item $CodexRemoteHome $backup
-  }
-
-  if ($CodexRemoteBranch) {
-    Invoke-Retry 3 3 "git clone" { & git clone --depth 1 --branch $CodexRemoteBranch $CodexRemoteRepo $CodexRemoteHome }
-  }
-  else {
-    Invoke-Retry 3 3 "git clone" { & git clone --depth 1 $CodexRemoteRepo $CodexRemoteHome }
-  }
-  Write-Pass "Cloned repository"
+  Install-FromRelease -HomePath $CodexRemoteHome -RepoUrl $CodexRemoteRepo -AssetName $ReleaseAssetName -Tag $ReleaseTag
 }
-
-Write-Host "  Installing anchor dependencies..."
-Invoke-Retry 3 3 "Anchor dependency install" {
-  Push-Location (Join-Path $CodexRemoteHome "services/anchor")
-  try {
-    & bun install --silent
-  }
-  finally {
-    Pop-Location
-  }
-}
-Write-Pass "Anchor dependencies installed"
 
 Write-Step "Installing CLI..."
-
 $binDir = Join-Path $CodexRemoteHome "bin"
 if (-not (Test-Path (Join-Path $binDir "codex-remote.ps1"))) {
   Abort "CLI script not found: $(Join-Path $binDir 'codex-remote.ps1')"
@@ -281,7 +379,6 @@ if (-not (Test-Path (Join-Path $binDir "codex-remote.cmd"))) {
 }
 
 Ensure-Path $binDir
-
 Ensure-EnvFile $CodexRemoteHome
 
 Write-Step "Self-host setup"
@@ -290,11 +387,16 @@ if (-not (Test-Path $selfHostScript)) {
   Write-WarnLine "Self-host wizard not found at $selfHostScript"
   Write-WarnLine "Run 'codex-remote self-host' after installation."
 }
-elseif (Confirm-Yes "Run self-host deployment now?") {
-  & $selfHostScript
+elseif ($RunSelfHost) {
+  if (-not (Test-Tool "bun")) {
+    Write-WarnLine "self-host requires bun for build/deploy steps. Install bun first, then rerun 'codex-remote self-host'."
+  }
+  else {
+    & $selfHostScript
+  }
 }
 else {
-  Write-Host "  Skipped cloud deployment. Run 'codex-remote self-host' when ready."
+  Write-Host "  Skipped cloud deployment. Set CODEX_REMOTE_RUN_SELF_HOST=1 to run it during install."
 }
 
 Write-Host ""
@@ -306,5 +408,9 @@ Write-Host "    codex-remote doctor    Check your setup"
 Write-Host "    codex-remote config    Edit configuration"
 Write-Host "    codex-remote help      See all commands"
 Write-Host ""
+if ($selectedMode -eq "release") {
+  Write-Host "  Installed from release asset: $ReleaseAssetName"
+  Write-Host "  To force source mode later: set CODEX_REMOTE_INSTALL_MODE=source and rerun installer."
+}
 Write-Host "  If this is a new terminal session, reopen PowerShell to refresh PATH."
 Write-Host ""

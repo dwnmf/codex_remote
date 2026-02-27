@@ -6,8 +6,17 @@ Codex Remote runs a local Anchor service on your machine that connects to Orbit 
 
 - macOS or Linux for the `install.sh` flow
 - Windows for the `install.ps1` flow
-- [Bun](https://bun.sh) runtime
-- [Codex CLI](https://github.com/openai/codex) installed
+- Internet access for dependency bootstrap
+
+`install.ps1` supports two modes:
+- `source` mode: clone repo + Bun runtime (requires `git` + `bun`)
+- `release` mode: download prebuilt Windows release package (does not require `git` or `bun` on the client)
+
+Default mode is `auto`:
+- if both `git` and `bun` are already present, installer uses `source`
+- otherwise installer uses `release`
+
+The installer always ensures [Codex CLI](https://github.com/openai/codex) is available and runs `codex login`.
 
 For a lighter backend alternative, see: [FastAPI Control Plane](fastapi-control-plane.md).
 
@@ -16,21 +25,34 @@ For a lighter backend alternative, see: [FastAPI Control Plane](fastapi-control-
 macOS / Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cospec-ai/codex-remote/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.sh | bash
 ```
 
 Windows (PowerShell):
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/cospec-ai/codex-remote/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.ps1 | iex
 ```
 
-This clones the repo to `~/.codex-remote`, installs Anchor dependencies, adds `codex-remote` to your PATH, and prompts whether to run `codex-remote self-host` immediately.
+To force a specific mode:
+
+```powershell
+$env:CODEX_REMOTE_INSTALL_MODE="release"   # or "source"
+iwr -useb https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.ps1 | iex
+```
+
+In release mode, installer downloads `codex-remote-windows-x64.zip` from GitHub Releases to `~/.codex-remote`, installs CLI wrappers, and uses the bundled `anchor.exe`.
+
+To run self-host setup during install:
+
+```bash
+CODEX_REMOTE_RUN_SELF_HOST=1 curl -fsSL https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.sh | bash
+```
 
 ### Build from source
 
 ```bash
-git clone https://github.com/cospec-ai/codex-remote.git ~/.codex-remote
+git clone https://github.com/dwnmf/codex_remote.git ~/.codex-remote
 cd ~/.codex-remote/services/anchor && bun install
 ```
 

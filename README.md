@@ -55,9 +55,11 @@ codex app-server
 
 ### 1) Требования
 
-- `Codex CLI` установлен и авторизован (`codex login`).
-- `Bun` установлен.
-- `git` установлен.
+- Windows-инсталлер (`install.ps1`) работает в двух режимах:
+  - `source`: клон репозитория + Bun runtime (`git` + `bun`)
+  - `release`: установка из prebuilt GitHub Release (без `git` и `bun` на клиенте)
+  По умолчанию `auto`: если нет `git`/`bun`, выбирается `release`.
+- Инсталлер проверяет `Codex CLI` и запускает `codex login`.
 - Для self-host режима: аккаунт Cloudflare + `wrangler` CLI.
 
 ### 2) Установка
@@ -74,7 +76,20 @@ Windows (PowerShell):
 iwr -useb https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.ps1 | iex
 ```
 
+Принудительный режим установки на Windows:
+
+```powershell
+$env:CODEX_REMOTE_INSTALL_MODE="release"   # или "source"
+iwr -useb https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.ps1 | iex
+```
+
 ### 3) Первый запуск
+
+```bash
+codex-remote start
+```
+
+Для self-host:
 
 ```bash
 codex-remote self-host
@@ -86,6 +101,12 @@ codex-remote start
 2. Вы входите через passkey.
 3. Anchor подключается к Orbit.
 4. Веб-интерфейс готов к удалённому управлению.
+
+Если нужно запускать self-host мастер прямо во время установки, используйте:
+
+```bash
+CODEX_REMOTE_RUN_SELF_HOST=1 curl -fsSL https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.sh | bash
+```
 
 ## Режимы работы
 

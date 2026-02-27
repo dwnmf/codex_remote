@@ -81,6 +81,22 @@ wrangler_tty() {
   fi
 }
 
+refresh_path_for_bun_global_tools() {
+  local bun_global_bin
+  bun_global_bin="$(bun pm bin -g 2>/dev/null || true)"
+  bun_global_bin="${bun_global_bin%%$'\n'*}"
+  if [[ -z "$bun_global_bin" ]]; then
+    return 0
+  fi
+
+  case ":$PATH:" in
+    *":$bun_global_bin:"*) ;;
+    *) export PATH="$bun_global_bin:$PATH" ;;
+  esac
+
+  hash -r
+}
+
 ensure_cloudflare_auth() {
   if retry_capture 2 2 "Cloudflare whoami" wrangler_tty whoami; then
     pass "Cloudflare authenticated"
@@ -306,6 +322,7 @@ else
   if confirm "  Install wrangler globally via bun?"; then
     retry 3 3 "wrangler install" bun add -g wrangler \
       || abort "Failed to install wrangler."
+    refresh_path_for_bun_global_tools
     command -v wrangler &>/dev/null || abort "Failed to install wrangler."
     pass "wrangler installed"
   else
