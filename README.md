@@ -1,164 +1,137 @@
 # Codex Remote
 
-`Codex Remote` позволяет запускать и контролировать сессии `Codex CLI` на вашем компьютере с телефона, планшета или любого браузера.
+Codex Remote позволяет запускать и контролировать сессии Codex CLI на вашем компьютере с телефона, планшета или любого браузера.
 
-Вы можете:
-- запускать задачи удалённо;
-- смотреть поток вывода агента в реальном времени;
-- подтверждать/отклонять действия (например, запись файлов);
-- просматривать диффы до применения изменений.
+Интерфейс показывает поток ответов в реальном времени, подтверждения действий и изменения файлов до применения.
 
 <img src="docs/assets/demo.gif" alt="Демо Codex Remote" width="320" />
 
-## Что это такое
+## Что Внутри
 
-Codex Remote состоит из трёх частей:
-- `Anchor` (локально): запускает `codex app-server` и передаёт команды/события.
-- `Orbit` (в облаке): ретрансляция WebSocket, аутентификация, push-уведомления.
-- `Web client` (в браузере): интерфейс управления сессиями.
-
-Схема:
+Архитектура состоит из трёх частей. Anchor работает локально и подключается к вашему `codex app-server`. Orbit работает в облаке и даёт аутентификацию, WebSocket relay и API. Web client открывается в браузере и управляет сессиями.
 
 ```text
-Телефон / Браузер
-        |
-        | HTTPS + WebSocket
-        v
-Orbit (Cloudflare / Deno Deploy)
-        ^
-        | WebSocket
-        v
+Браузер
+  │ HTTPS + WebSocket
+  ▼
+Orbit (Cloudflare или Deno Deploy)
+  │ WebSocket
+  ▼
 Anchor (локально)
-        |
-        | JSON-RPC over stdio
-        v
+  │ JSON-RPC over stdio
+  ▼
 codex app-server
 ```
 
-## Для кого
+## Что Нового
 
-- Для разработчиков, которые запускают Codex локально и хотят контролировать его удалённо.
-- Для команд, где нужно быстро согласовывать действия агента без доступа к ноутбуку.
-- Для тех, кому важен self-hosting и контроль своей инфраструктуры.
+В проект добавлен второй self-host провайдер `deno`, а также единый флоу `codex-remote self-host --provider ... --login`, который сразу после деплоя выполняет вход устройства без отдельного ручного шага.
 
-## Ключевые возможности
+| Функция | Как это работает сейчас |
+|---|---|
+| Два провайдера self-host | `cloudflare` и `deno` |
+| Единый деплой+логин | `codex-remote self-host --provider <name> --login` |
+| Обновление self-host | `codex-remote update` делает redeploy по `SELF_HOST_PROVIDER` |
+| Валидация Deno токена | мастер проверяет `DENO_DEPLOY_TOKEN` и подсказывает ошибки |
+| Совместимость с UI/Anchor | поддержаны `/ws/client`, `/ws/anchor`, device-login и session API |
 
-- Удалённый запуск задач в Codex CLI.
-- Live-поток ответов и событий сессии.
-- Подтверждение опасных операций из браузера.
-- Просмотр диффов по каждому шагу.
-- Поддержка passkey (WebAuthn) в облачном режиме.
-- Push-уведомления (при self-host настройке).
-- Локальный режим без Cloudflare (для доверенной сети).
+## Быстрый Старт
 
-## Быстрый старт
-
-### 1) Требования
-
-- Windows-инсталлер (`install.ps1`) работает в двух режимах:
-  - `source`: клон репозитория + Bun runtime (`git` + `bun`)
-  - `release`: установка из prebuilt GitHub Release (без `git` и `bun` на клиенте)
-  По умолчанию `auto`: если нет `git`/`bun`, выбирается `release`.
-- Инсталлер проверяет `Codex CLI` и запускает `codex login`.
-- Для self-host режима: выберите провайдера:
-  - `cloudflare` (через `wrangler`)
-  - `deno` (через `deployctl` + `DENO_DEPLOY_TOKEN`)
-
-### 2) Установка
-
-macOS / Linux:
+### Установка на macOS или Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.sh | bash
 ```
 
-Windows (PowerShell):
+### Установка на Windows
 
 ```powershell
 iwr -useb https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.ps1 | iex
 ```
 
-Принудительный режим установки на Windows:
+### Установка на Windows в режиме release или source
 
 ```powershell
-$env:CODEX_REMOTE_INSTALL_MODE="release"   # или "source"
+$env:CODEX_REMOTE_INSTALL_MODE="release"
 iwr -useb https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.ps1 | iex
 ```
 
-### 3) Первый запуск
-
-```bash
-codex-remote start
+```powershell
+$env:CODEX_REMOTE_INSTALL_MODE="source"
+iwr -useb https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.ps1 | iex
 ```
 
-Для self-host:
+### Запуск self-host через Cloudflare
 
 ```bash
 codex-remote self-host --provider cloudflare --login
-# или
+codex-remote start
+```
+
+### Запуск self-host через Deno Deploy
+
+```bash
 codex-remote self-host --provider deno --login
 codex-remote start
 ```
 
-Что произойдёт:
-1. Откроется авторизация устройства.
-2. Вы входите через passkey.
-3. Anchor подключается к Orbit.
-4. Веб-интерфейс готов к удалённому управлению.
+Для Deno нужен `DENO_DEPLOY_TOKEN`. Токен можно создать в кабинете Deno Deploy: `https://dash.deno.com/account#access-tokens`. Текущий `deployctl` работает с Classic-организациями Deno Deploy.
 
-Если нужно запускать self-host мастер прямо во время установки, используйте:
+### Запуск мастера self-host прямо во время install
 
 ```bash
 CODEX_REMOTE_RUN_SELF_HOST=1 curl -fsSL https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.sh | bash
 ```
 
-## Режимы работы
-
-### Self-host (рекомендуется)
-
-- Полный контроль над инфраструктурой (Cloudflare или Deno Deploy).
-- Аутентификация и уведомления работают из коробки после `codex-remote self-host`.
-
-### Local mode (без Cloudflare)
-
-Подходит для доверенной сети (LAN, Tailscale, WireGuard), когда облако не нужно.
-
-Запуск Anchor:
-
-```bash
-cd services/anchor
-bun install
-ANCHOR_ORBIT_URL="" bun run dev
-```
-
-Запуск веб-клиента:
-
-```bash
-bun install
-bun run dev -- --host 0.0.0.0
-```
-
-После этого откройте `http://<ваш-ip>:5173`.
-
-Важно: в local mode нет встроенной аутентификации. Используйте только в доверенной сети.
-
 ## Команды CLI
 
-| Команда | Описание |
+| Команда | Назначение |
 |---|---|
-| `codex-remote start` | Запуск Anchor |
-| `codex-remote login` | Повторная авторизация устройства |
-| `codex-remote doctor` | Проверка окружения и конфигурации |
-| `codex-remote config` | Открыть `.env` в редакторе |
-| `codex-remote update` | Обновить код и зависимости |
-| `codex-remote self-host [--provider cloudflare\|deno] [--login\|--no-login]` | Мастер self-host развёртывания + выбор провайдера + опциональный post-setup login |
-| `codex-remote uninstall` | Удалить Codex Remote |
-| `codex-remote version` | Показать версию |
-| `codex-remote help` | Справка по командам |
+| `codex-remote start` | Запускает Anchor |
+| `codex-remote login` | Повторно авторизует устройство |
+| `codex-remote doctor` | Проверяет окружение, `.env`, токены и статус Anchor |
+| `codex-remote config` | Открывает `.env` в редакторе |
+| `codex-remote update` | Обновляет код, зависимости и self-host деплой |
+| `codex-remote self-host --provider cloudflare|deno --login|--no-login` | Запускает мастер self-host и управляет post-setup логином |
+| `codex-remote uninstall` | Удаляет Codex Remote |
+| `codex-remote version` | Показывает версию |
+| `codex-remote help` | Показывает справку |
 
-## Локальная разработка
+## Схема Self-Host Флоу
 
-Быстрые команды:
+```text
+codex-remote self-host --provider deno --login
+        │
+        ├─ Проверка локального окружения
+        ├─ Проверка провайдерных инструментов
+        ├─ Генерация JWT и VAPID секретов
+        ├─ Деплой Orbit backend
+        ├─ Сборка и деплой web
+        ├─ Запись .env для Anchor
+        └─ codex-remote login
+```
+
+## Deno Провайдер: Важный Нюанс
+
+На Deno-провайдере TOTP endpoint-ы пока не доступны, поэтому используйте passkey режим для регистрации и входа. Сообщение `TOTP endpoints are not available on deno provider yet.` является ожидаемым для текущей версии.
+
+## Если Сессии Не Грузятся
+
+Сначала проверьте состояние одной командой.
+
+```bash
+codex-remote doctor
+```
+
+Если в doctor всё `OK`, обычно помогает перезапуск Anchor.
+
+```bash
+codex-remote start
+```
+
+В self-host режиме URL в настройках должен вести на ваш Orbit endpoint и заканчиваться на `/ws/client`, например `wss://<your-app>.deno.dev/ws/client`.
+
+## Локальная Разработка
 
 ```bash
 bun run lint
@@ -166,27 +139,25 @@ bun run test
 bun run ci:local
 ```
 
-Запуск полного локального стека (frontend + FastAPI control-plane + anchor):
-
 ```bash
 bun run dev:all
 ```
 
-По умолчанию:
-- frontend: `http://localhost:5173`
-- backend: `http://localhost:8080`
+По умолчанию frontend открывается на `http://localhost:5173`, backend на `http://localhost:8080`.
 
 ## Документация
 
-- [Установка](docs/installation.md)
-- [Self-hosting](docs/self-hosting.md)
-- [Архитектура](docs/architecture.md)
-- [Аутентификация](docs/auth.md)
-- [События и протокол](docs/events.md)
-- [Безопасность](docs/security.md)
-- [FastAPI control-plane](docs/fastapi-control-plane.md)
-- [Структура репозитория](docs/repo-structure.md)
-- [Vision](docs/vision.md)
+| Раздел | Ссылка |
+|---|---|
+| Установка | [docs/installation.md](docs/installation.md) |
+| Self-hosting | [docs/self-hosting.md](docs/self-hosting.md) |
+| Архитектура | [docs/architecture.md](docs/architecture.md) |
+| Аутентификация | [docs/auth.md](docs/auth.md) |
+| События и протокол | [docs/events.md](docs/events.md) |
+| Безопасность | [docs/security.md](docs/security.md) |
+| FastAPI control-plane | [docs/fastapi-control-plane.md](docs/fastapi-control-plane.md) |
+| Структура репозитория | [docs/repo-structure.md](docs/repo-structure.md) |
+| Vision | [docs/vision.md](docs/vision.md) |
 
 ## Лицензия
 
