@@ -62,5 +62,35 @@ describe("messages turn terminal handling", () => {
 
     expect(messages.getThreadTurnStatus("thread-1")).toBe("Failed");
   });
-});
 
+  test("stores structured file-change metadata with line stats", async () => {
+    const { messages } = await loadFreshMessagesModule();
+    messages.handleMessage({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        item: {
+          id: "file-1",
+          type: "fileChange",
+          changes: [
+            {
+              path: "src/app.ts",
+              diff: [
+                "@@ -1,2 +1,3 @@",
+                "-const a = 1;",
+                "+const a = 2;",
+                "+const b = 3;",
+              ].join("\n"),
+            },
+          ],
+        },
+      },
+    });
+
+    const fileMessage = messages.getThreadMessages("thread-1").find((item) => item.id === "file-1");
+    expect(fileMessage?.kind).toBe("file");
+    expect(fileMessage?.metadata?.linesAdded).toBe(2);
+    expect(fileMessage?.metadata?.linesRemoved).toBe(1);
+    expect(fileMessage?.metadata?.fileChanges?.[0]?.path).toBe("src/app.ts");
+  });
+});

@@ -4,6 +4,7 @@ import type {
   DeviceCodeRecord,
   PasskeyCredentialRecord,
   Settings,
+  TotpFactorRecord,
   UserRecord,
   WebSessionRecord,
 } from "./types.ts";
@@ -55,6 +56,10 @@ function kvAnchorAccessKey(accessHash: string): Deno.KvKey {
 
 function kvAnchorRefreshKey(refreshHash: string): Deno.KvKey {
   return ["anchor-sessions", "by-refresh", refreshHash];
+}
+
+function kvTotpFactorByUserKey(userId: string): Deno.KvKey {
+  return ["totp", "by-user", userId];
 }
 
 export class KvStore {
@@ -138,6 +143,44 @@ export class KvStore {
       updatedAt: Date.now(),
     };
     await this.upsertCredential(updated);
+  }
+
+  async getTotpFactorByUserId(userId: string): Promise<TotpFactorRecord | null> {
+    const entry = await this.database.get<TotpFactorRecord>(kvTotpFactorByUserKey(userId));
+    return entry.value ?? null;
+  }
+
+  async upsertTotpFactor(
+    factor: Omit<TotpFactorRecord, "createdAt" | "updatedAt"> & { createdAt?: number; updatedAt?: number },
+  ): Promise<void> {
+    const existing = await this.getTotpFactorByUserId(factor.userId);
+    const now = Date.now();
+    const next: TotpFactorRecord = {
+      ...factor,
+      createdAt: existing?.createdAt ?? factor.createdAt ?? now,
+      updatedAt: factor.updatedAt ?? now,
+    };
+    await this.database.set(kvTotpFactorByUserKey(factor.userId), next);
+  }
+
+  async consumeTotpStep(userId: string, step: number): Promise<boolean> {
+    const key = kvTotpFactorByUserKey(userId);
+    const entry = await this.database.get<TotpFactorRecord>(key);
+    if (!entry.value) return false;
+
+    const current = entry.value;
+    if (current.lastUsedStep != null && current.lastUsedStep >= step) {
+      return false;
+    }
+
+    const updated: TotpFactorRecord = {
+      ...current,
+      lastUsedStep: step,
+      updatedAt: Date.now(),
+    };
+
+    const committed = await this.database.atomic().check(entry).set(key, updated).commit();
+    return committed.ok;
   }
 
   async createWebSession(userId: string): Promise<{ session: WebSessionRecord; refreshToken: string }> {

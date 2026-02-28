@@ -1,4 +1,14 @@
-import type { Message, RpcMessage, ApprovalRequest, UserInputRequest, UserInputQuestion, TurnStatus, PlanStep, CollaborationMode } from "./types";
+import type {
+  ApprovalRequest,
+  CollaborationMode,
+  FileChangeEntry,
+  Message,
+  PlanStep,
+  RpcMessage,
+  TurnStatus,
+  UserInputQuestion,
+  UserInputRequest,
+} from "./types";
 import { socket } from "./socket.svelte";
 import { threads } from "./threads.svelte";
 import { appendDeltaWithCap, keepRecentMessages } from "./message-limits";
@@ -14,6 +24,55 @@ interface ReasoningState {
 }
 
 type TurnCompleteCallback = (threadId: string, finalText: string) => void;
+
+function countDiffLines(diff: string): { linesAdded: number; linesRemoved: number } {
+  let linesAdded = 0;
+  let linesRemoved = 0;
+
+  for (const line of diff.split("\n")) {
+    if (!line) continue;
+    if (line.startsWith("+++ ") || line.startsWith("--- ") || line.startsWith("@@")) continue;
+    if (line.startsWith("diff --git ") || line.startsWith("index ")) continue;
+    if (line.startsWith("\\ No newline")) continue;
+    if (line.startsWith("+")) linesAdded += 1;
+    else if (line.startsWith("-")) linesRemoved += 1;
+  }
+
+  return { linesAdded, linesRemoved };
+}
+
+function normalizeFileChanges(changes: unknown): {
+  text: string;
+  entries: FileChangeEntry[];
+  linesAdded: number;
+  linesRemoved: number;
+} {
+  if (!Array.isArray(changes)) {
+    return { text: "", entries: [], linesAdded: 0, linesRemoved: 0 };
+  }
+
+  const entries: FileChangeEntry[] = [];
+  let linesAdded = 0;
+  let linesRemoved = 0;
+
+  for (const change of changes as Array<Record<string, unknown>>) {
+    const path = typeof change?.path === "string" ? change.path : "";
+    if (!path) continue;
+    const diff = typeof change?.diff === "string" ? change.diff : "";
+    const stats = countDiffLines(diff);
+    linesAdded += stats.linesAdded;
+    linesRemoved += stats.linesRemoved;
+    entries.push({
+      path,
+      ...(diff ? { diff } : {}),
+      linesAdded: stats.linesAdded,
+      linesRemoved: stats.linesRemoved,
+    });
+  }
+
+  const text = entries.map((entry) => `${entry.path}\n${entry.diff ?? ""}`).join("\n\n");
+  return { text, entries, linesAdded, linesRemoved };
+}
 
 class MessagesStore {
   #byThread = $state<Map<string, Message[]>>(new Map());
@@ -1130,9 +1189,19 @@ class MessagesStore {
           return;
         }
         case "fileChange": {
-          const changes = item.changes as Array<{ path: string; diff?: string }>;
-          const text = changes?.map((c) => `${c.path}\n${c.diff || ""}`).join("\n\n") || "";
-          this.#upsert(threadId, { id: itemId, role: "tool", kind: "file", text, threadId });
+          const normalized = normalizeFileChanges(item.changes);
+          this.#upsert(threadId, {
+            id: itemId,
+            role: "tool",
+            kind: "file",
+            text: normalized.text,
+            threadId,
+            metadata: {
+              linesAdded: normalized.linesAdded,
+              linesRemoved: normalized.linesRemoved,
+              fileChanges: normalized.entries,
+            },
+          });
           this.#clearStreaming(threadId, itemId);
           return;
         }
@@ -1254,13 +1323,18 @@ class MessagesStore {
           }
 
           case "fileChange": {
-            const changes = item.changes as Array<{ path: string; diff?: string }>;
+            const normalized = normalizeFileChanges(item.changes);
             messages.push({
               id,
               role: "tool",
               kind: "file",
-              text: changes?.map((c) => `${c.path}\n${c.diff || ""}`).join("\n\n") || "",
+              text: normalized.text,
               threadId,
+              metadata: {
+                linesAdded: normalized.linesAdded,
+                linesRemoved: normalized.linesRemoved,
+                fileChanges: normalized.entries,
+              },
             });
             break;
           }

@@ -1,8 +1,10 @@
 import { SignJWT, jwtVerify } from "npm:jose";
 
 import type { KvStore } from "./kv-store.ts";
-import type { SessionPayload, Settings, UserRecord } from "./types.ts";
+import type { SessionPayload, Settings, TotpSetupPayload, UserRecord } from "./types.ts";
 import { nowSec } from "./utils.ts";
+
+const TOTP_SETUP_TOKEN_TTL_SEC = 10 * 60;
 
 export async function createWebSessionToken(
   settings: Settings,
@@ -75,6 +77,56 @@ export async function verifyAnchorAnyToken(
       return null;
     }
     return { sub: payload.sub };
+  } catch {
+    return null;
+  }
+}
+
+export async function createTotpSetupToken(settings: Settings, payload: TotpSetupPayload): Promise<string> {
+  const now = nowSec();
+  return await new SignJWT(payload as unknown as Record<string, unknown>)
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuer("codex-remote-auth")
+    .setAudience("codex-remote-totp-setup")
+    .setIssuedAt(now)
+    .setExpirationTime(now + TOTP_SETUP_TOKEN_TTL_SEC)
+    .sign(new TextEncoder().encode(settings.webJwtSecret));
+}
+
+export async function verifyTotpSetupToken(
+  settings: Settings,
+  token: string,
+): Promise<TotpSetupPayload | null> {
+  try {
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(settings.webJwtSecret), {
+      issuer: "codex-remote-auth",
+      audience: "codex-remote-totp-setup",
+    });
+
+    if (
+      typeof payload.name !== "string" ||
+      typeof payload.displayName !== "string" ||
+      typeof payload.secretBase32 !== "string" ||
+      typeof payload.digits !== "number" ||
+      typeof payload.periodSec !== "number" ||
+      typeof payload.nonce !== "string"
+    ) {
+      return null;
+    }
+
+    if (payload.userId !== undefined && typeof payload.userId !== "string") {
+      return null;
+    }
+
+    return {
+      name: payload.name,
+      displayName: payload.displayName,
+      secretBase32: payload.secretBase32,
+      digits: payload.digits,
+      periodSec: payload.periodSec,
+      nonce: payload.nonce,
+      userId: typeof payload.userId === "string" ? payload.userId : undefined,
+    };
   } catch {
     return null;
   }

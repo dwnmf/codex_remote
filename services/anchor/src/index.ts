@@ -40,6 +40,7 @@ let orbitHeartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
 let warnedNoAppServer = false;
 let appServerInitialized = false;
 const MAX_IMAGE_READ_BYTES = 20 * 1024 * 1024;
+const MAX_FILE_READ_BYTES = 512 * 1024;
 
 // Buffer pending approval requests from app-server so we can re-send them
 // when a client (re)subscribes to a thread via orbit.
@@ -326,6 +327,46 @@ async function handleAnchorImageRead(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to read image";
+    return { id, error: { code: -1, message } };
+  }
+}
+
+async function handleAnchorFileRead(
+  id: number | string,
+  params: JsonObject | null,
+): Promise<JsonObject> {
+  try {
+    const filePath = ensureAbsolutePath(getParamString(params, "path"), "path");
+    const file = Bun.file(filePath);
+    if (!(await file.exists())) {
+      return { id, error: { code: -1, message: "File not found" } };
+    }
+
+    const bytes = file.size;
+    if (bytes > MAX_FILE_READ_BYTES) {
+      return {
+        id,
+        result: {
+          path: filePath,
+          content: "",
+          bytes,
+          truncated: true,
+        },
+      };
+    }
+
+    const content = await file.text();
+    return {
+      id,
+      result: {
+        path: filePath,
+        content,
+        bytes,
+        truncated: false,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to read file";
     return { id, error: { code: -1, message } };
   }
 }
@@ -708,6 +749,9 @@ async function maybeHandleAnchorLocalRpc(message: JsonObject): Promise<JsonObjec
   }
   if (message.method === "anchor.image.read") {
     return handleAnchorImageRead(id, params);
+  }
+  if (message.method === "anchor.file.read") {
+    return handleAnchorFileRead(id, params);
   }
 
   return null;

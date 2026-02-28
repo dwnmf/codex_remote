@@ -23,8 +23,29 @@ import {
   resolveRpId,
 } from "./utils.ts";
 import type { Settings, UserRecord } from "./types.ts";
-import { createWebSessionToken, verifyAnchorAnyToken, verifyWebToken } from "./jwt.ts";
+import {
+  createTotpSetupToken,
+  createWebSessionToken,
+  verifyAnchorAnyToken,
+  verifyTotpSetupToken,
+  verifyWebToken,
+} from "./jwt.ts";
 import { base64UrlDecode, base64UrlEncode, nowSec, randomId } from "./utils.ts";
+import {
+  buildTotpUri,
+  createTotpSetupTokenPayload,
+  generateTotpSecret,
+  verifyTotpCode,
+} from "./totp.ts";
+
+const TOTP_DIGITS = 6;
+const TOTP_PERIOD_SEC = 30;
+const TOTP_ISSUER = "Codex Remote";
+
+function parseTotpCode(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw.replace(/\s|-/g, "").trim();
+}
 
 export async function getAuthenticatedUser(
   settings: Settings,
@@ -61,12 +82,13 @@ async function handleSession(settings: Settings, store: KvStore, req: Request): 
   const user = await getAuthenticatedUser(settings, store, req);
   const hasUsers = await store.hasAnyUsers();
   const hasPasskey = user ? (await store.listCredentials(user.id)).length > 0 : false;
+  const hasTotp = user ? Boolean(await store.getTotpFactorByUserId(user.id)) : false;
 
   return jsonWithCors(settings, req, {
     authenticated: Boolean(user),
     user: user ? { id: user.id, name: user.name } : null,
     hasPasskey,
-    hasTotp: false,
+    hasTotp,
     systemHasUsers: hasUsers,
   });
 }
@@ -400,6 +422,250 @@ async function handleLoginVerify(settings: Settings, store: KvStore, req: Reques
   return await createUserSessionResponse(settings, store, req, user);
 }
 
+async function handleTotpRegisterStart(settings: Settings, store: KvStore, req: Request): Promise<Response> {
+  if (settings.authMode !== "passkey") {
+    return jsonWithCors(settings, req, { error: "TOTP flow is disabled. Use AUTH_MODE=passkey." }, 400);
+  }
+
+  const origin = req.headers.get("origin");
+  if (!isOriginAllowed(settings, origin)) {
+    return jsonWithCors(settings, req, { error: "Origin not allowed." }, 403);
+  }
+
+  const body = await parseJson(req);
+  const name = asString(body?.name);
+  const displayName = asString(body?.displayName) ?? name;
+  if (!name) {
+    return jsonWithCors(settings, req, { error: "Name is required." }, 400);
+  }
+
+  const existing = await store.getUserByName(name);
+  if (existing) {
+    return jsonWithCors(settings, req, { error: "Registration failed." }, 400);
+  }
+
+  const secretBase32 = generateTotpSecret();
+  const payload = createTotpSetupTokenPayload({
+    name,
+    displayName: displayName ?? name,
+    secretBase32,
+    digits: TOTP_DIGITS,
+    periodSec: TOTP_PERIOD_SEC,
+  });
+  const setupToken = await createTotpSetupToken(settings, payload);
+
+  const otpauthUrl = buildTotpUri({
+    secretBase32,
+    accountName: name,
+    issuer: TOTP_ISSUER,
+    digits: TOTP_DIGITS,
+    periodSec: TOTP_PERIOD_SEC,
+  });
+
+  return jsonWithCors(settings, req, {
+    setupToken,
+    secret: secretBase32,
+    otpauthUrl,
+    issuer: TOTP_ISSUER,
+    digits: TOTP_DIGITS,
+    period: TOTP_PERIOD_SEC,
+  });
+}
+
+async function handleTotpRegisterVerify(settings: Settings, store: KvStore, req: Request): Promise<Response> {
+  if (settings.authMode !== "passkey") {
+    return jsonWithCors(settings, req, { error: "TOTP flow is disabled. Use AUTH_MODE=passkey." }, 400);
+  }
+
+  const origin = req.headers.get("origin");
+  if (!isOriginAllowed(settings, origin)) {
+    return jsonWithCors(settings, req, { error: "Origin not allowed." }, 403);
+  }
+
+  const body = await parseJson(req);
+  const setupToken = asString(body?.setupToken);
+  const code = parseTotpCode(body?.code);
+  if (!setupToken || !code) {
+    return jsonWithCors(settings, req, { error: "setupToken and code are required." }, 400);
+  }
+
+  const payload = await verifyTotpSetupToken(settings, setupToken);
+  if (!payload) {
+    return jsonWithCors(settings, req, { error: "Setup token expired." }, 400);
+  }
+
+  const existing = await store.getUserByName(payload.name);
+  if (existing) {
+    return jsonWithCors(settings, req, { error: "Registration failed." }, 400);
+  }
+
+  const verification = await verifyTotpCode(payload.secretBase32, code, {
+    digits: payload.digits,
+    periodSec: payload.periodSec,
+    window: 1,
+  });
+  if (!verification.valid || verification.step == null) {
+    return jsonWithCors(settings, req, { error: "Invalid code." }, 400);
+  }
+
+  const user = await store.createUser(payload.name, payload.displayName);
+  if (!user) {
+    return jsonWithCors(settings, req, { error: "Registration failed." }, 400);
+  }
+
+  await store.upsertTotpFactor({
+    userId: user.id,
+    secretBase32: payload.secretBase32,
+    digits: payload.digits,
+    periodSec: payload.periodSec,
+    algorithm: "SHA1",
+    lastUsedStep: verification.step,
+  });
+
+  return await createUserSessionResponse(settings, store, req, user);
+}
+
+async function handleTotpLogin(settings: Settings, store: KvStore, req: Request): Promise<Response> {
+  if (settings.authMode !== "passkey") {
+    return jsonWithCors(settings, req, { error: "TOTP flow is disabled. Use AUTH_MODE=passkey." }, 400);
+  }
+
+  const origin = req.headers.get("origin");
+  if (!isOriginAllowed(settings, origin)) {
+    return jsonWithCors(settings, req, { error: "Origin not allowed." }, 403);
+  }
+
+  const body = await parseJson(req);
+  const username = asString(body?.username);
+  const code = parseTotpCode(body?.code);
+  if (!username || !code) {
+    return jsonWithCors(settings, req, { error: "Invalid credentials." }, 400);
+  }
+
+  const user = await store.getUserByName(username);
+  if (!user) {
+    return jsonWithCors(settings, req, { error: "Invalid credentials." }, 400);
+  }
+
+  const factor = await store.getTotpFactorByUserId(user.id);
+  if (!factor) {
+    return jsonWithCors(settings, req, { error: "Invalid credentials." }, 400);
+  }
+
+  const verification = await verifyTotpCode(factor.secretBase32, code, {
+    digits: factor.digits,
+    periodSec: factor.periodSec,
+    window: 1,
+  });
+  if (!verification.valid || verification.step == null) {
+    return jsonWithCors(settings, req, { error: "Invalid credentials." }, 400);
+  }
+
+  const consumed = await store.consumeTotpStep(user.id, verification.step);
+  if (!consumed) {
+    return jsonWithCors(settings, req, { error: "Invalid credentials." }, 400);
+  }
+
+  return await createUserSessionResponse(settings, store, req, user);
+}
+
+async function handleTotpSetupStart(settings: Settings, store: KvStore, req: Request): Promise<Response> {
+  if (settings.authMode !== "passkey") {
+    return jsonWithCors(settings, req, { error: "TOTP flow is disabled. Use AUTH_MODE=passkey." }, 400);
+  }
+
+  const user = await getAuthenticatedUser(settings, store, req);
+  if (!user) {
+    return jsonWithCors(settings, req, { error: "Authentication required." }, 401);
+  }
+
+  const origin = req.headers.get("origin");
+  if (!isOriginAllowed(settings, origin)) {
+    return jsonWithCors(settings, req, { error: "Origin not allowed." }, 403);
+  }
+
+  const body = await parseJson(req);
+  const username = asString(body?.username) ?? user.name;
+  const secretBase32 = generateTotpSecret();
+  const payload = createTotpSetupTokenPayload({
+    name: username,
+    displayName: user.displayName,
+    secretBase32,
+    digits: TOTP_DIGITS,
+    periodSec: TOTP_PERIOD_SEC,
+    userId: user.id,
+  });
+  const setupToken = await createTotpSetupToken(settings, payload);
+
+  const otpauthUrl = buildTotpUri({
+    secretBase32,
+    accountName: username,
+    issuer: TOTP_ISSUER,
+    digits: TOTP_DIGITS,
+    periodSec: TOTP_PERIOD_SEC,
+  });
+
+  return jsonWithCors(settings, req, {
+    setupToken,
+    secret: secretBase32,
+    otpauthUrl,
+    issuer: TOTP_ISSUER,
+    digits: TOTP_DIGITS,
+    period: TOTP_PERIOD_SEC,
+  });
+}
+
+async function handleTotpSetupVerify(settings: Settings, store: KvStore, req: Request): Promise<Response> {
+  if (settings.authMode !== "passkey") {
+    return jsonWithCors(settings, req, { error: "TOTP flow is disabled. Use AUTH_MODE=passkey." }, 400);
+  }
+
+  const user = await getAuthenticatedUser(settings, store, req);
+  if (!user) {
+    return jsonWithCors(settings, req, { error: "Authentication required." }, 401);
+  }
+
+  const origin = req.headers.get("origin");
+  if (!isOriginAllowed(settings, origin)) {
+    return jsonWithCors(settings, req, { error: "Origin not allowed." }, 403);
+  }
+
+  const body = await parseJson(req);
+  const setupToken = asString(body?.setupToken);
+  const code = parseTotpCode(body?.code);
+  if (!setupToken || !code) {
+    return jsonWithCors(settings, req, { error: "setupToken and code are required." }, 400);
+  }
+
+  const payload = await verifyTotpSetupToken(settings, setupToken);
+  if (!payload) {
+    return jsonWithCors(settings, req, { error: "Setup token expired." }, 400);
+  }
+  if (!payload.userId || payload.userId !== user.id) {
+    return jsonWithCors(settings, req, { error: "Setup token user mismatch." }, 400);
+  }
+
+  const verification = await verifyTotpCode(payload.secretBase32, code, {
+    digits: payload.digits,
+    periodSec: payload.periodSec,
+    window: 1,
+  });
+  if (!verification.valid || verification.step == null) {
+    return jsonWithCors(settings, req, { error: "Invalid code." }, 400);
+  }
+
+  await store.upsertTotpFactor({
+    userId: user.id,
+    secretBase32: payload.secretBase32,
+    digits: payload.digits,
+    periodSec: payload.periodSec,
+    algorithm: "SHA1",
+    lastUsedStep: verification.step,
+  });
+
+  return jsonWithCors(settings, req, { verified: true, hasTotp: true }, 200);
+}
+
 async function handleRefresh(settings: Settings, store: KvStore, req: Request): Promise<Response> {
   const body = await parseJson(req);
   const refreshToken = asString(body?.refreshToken);
@@ -532,10 +798,6 @@ async function handleDeviceRefresh(settings: Settings, store: KvStore, req: Requ
   });
 }
 
-function unsupportedTotp(settings: Settings, req: Request): Response {
-  return jsonWithCors(settings, req, { error: "TOTP endpoints are not available on deno provider yet." }, 400);
-}
-
 export async function handleAuthRequest(settings: Settings, store: KvStore, req: Request, pathname: string): Promise<Response> {
   if (req.method === "OPTIONS") {
     return jsonWithCors(settings, req, {}, 204);
@@ -548,22 +810,17 @@ export async function handleAuthRequest(settings: Settings, store: KvStore, req:
   if (pathname === "/auth/register/verify" && req.method === "POST") return await handleRegisterVerify(settings, store, req);
   if (pathname === "/auth/login/options" && req.method === "POST") return await handleLoginOptions(settings, store, req);
   if (pathname === "/auth/login/verify" && req.method === "POST") return await handleLoginVerify(settings, store, req);
+  if (pathname === "/auth/register/totp/start" && req.method === "POST") return await handleTotpRegisterStart(settings, store, req);
+  if (pathname === "/auth/register/totp/verify" && req.method === "POST") return await handleTotpRegisterVerify(settings, store, req);
+  if (pathname === "/auth/login/totp" && req.method === "POST") return await handleTotpLogin(settings, store, req);
+  if (pathname === "/auth/totp/setup/options" && req.method === "POST") return await handleTotpSetupStart(settings, store, req);
+  if (pathname === "/auth/totp/setup/verify" && req.method === "POST") return await handleTotpSetupVerify(settings, store, req);
   if (pathname === "/auth/refresh" && req.method === "POST") return await handleRefresh(settings, store, req);
   if (pathname === "/auth/logout" && req.method === "POST") return await handleLogout(settings, store, req);
   if (pathname === "/auth/device/code" && req.method === "POST") return await handleDeviceCode(settings, store, req);
   if (pathname === "/auth/device/authorise" && req.method === "POST") return await handleDeviceAuthorise(settings, store, req);
   if (pathname === "/auth/device/token" && req.method === "POST") return await handleDeviceToken(settings, store, req);
   if (pathname === "/auth/device/refresh" && req.method === "POST") return await handleDeviceRefresh(settings, store, req);
-
-  if (
-    pathname === "/auth/register/totp/start" ||
-    pathname === "/auth/register/totp/verify" ||
-    pathname === "/auth/login/totp" ||
-    pathname === "/auth/totp/setup/options" ||
-    pathname === "/auth/totp/setup/verify"
-  ) {
-    return unsupportedTotp(settings, req);
-  }
 
   return jsonWithCors(settings, req, { error: "Not found" }, 404);
 }

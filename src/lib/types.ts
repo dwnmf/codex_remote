@@ -55,11 +55,19 @@ export type MessageKind =
   | "collab"
   | "compaction";
 
+export interface FileChangeEntry {
+  path: string;
+  diff?: string;
+  linesAdded: number;
+  linesRemoved: number;
+}
+
 export interface MessageMetadata {
   filePath?: string;
   exitCode?: number;
   linesAdded?: number;
   linesRemoved?: number;
+  fileChanges?: FileChangeEntry[];
   imagePath?: string;
   imageUrl?: string;
   imageMimeType?: string;
@@ -221,6 +229,13 @@ export interface GitWorktreeCreateResult {
   path: string;
   branch: string;
   head: string;
+}
+
+export interface AnchorFileReadResult {
+  path: string;
+  content: string;
+  bytes: number;
+  truncated: boolean;
 }
 
 export interface OrbitArtifactLink {

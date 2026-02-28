@@ -1,4 +1,5 @@
 import type {
+  AnchorFileReadResult,
   ConnectionStatus,
   GitInspectResult,
   GitWorktreeCreateParams,
@@ -421,6 +422,22 @@ class SocketStore {
         ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
       },
       "anchor-image-read",
+    );
+  }
+
+  readFile(path: string, anchorId?: string): Promise<AnchorFileReadResult> {
+    const normalizedPath = path.trim();
+    if (!normalizedPath) {
+      return Promise.reject(new Error("path is required"));
+    }
+
+    return this.#requestRpc<AnchorFileReadResult>(
+      "anchor.file.read",
+      {
+        path: normalizedPath,
+        ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+      },
+      "anchor-file-read",
     );
   }
 

@@ -18,6 +18,16 @@ export interface Settings {
   anchorRefreshTtlSec: number;
 }
 
+export interface TotpSetupPayload {
+  name: string;
+  displayName: string;
+  secretBase32: string;
+  digits: number;
+  periodSec: number;
+  nonce: string;
+  userId?: string;
+}
+
 export interface UserRecord {
   id: string;
   name: string;
@@ -62,6 +72,17 @@ export interface PasskeyCredentialRecord {
   transports: string[] | undefined;
   deviceType: string | undefined;
   backedUp: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TotpFactorRecord {
+  userId: string;
+  secretBase32: string;
+  digits: number;
+  periodSec: number;
+  algorithm: "SHA1";
+  lastUsedStep: number | null;
   createdAt: number;
   updatedAt: number;
 }

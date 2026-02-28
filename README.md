@@ -111,9 +111,9 @@ codex-remote self-host --provider deno --login
         └─ codex-remote login
 ```
 
-## Deno Провайдер: Важный Нюанс
+## Deno Провайдер: Аутентификация
 
-На Deno-провайдере TOTP endpoint-ы пока не доступны, поэтому используйте passkey режим для регистрации и входа. Сообщение `TOTP endpoints are not available on deno provider yet.` является ожидаемым для текущей версии.
+На Deno-провайдере поддерживаются оба варианта входа в web: passkey и TOTP.
 
 ## Если Сессии Не Грузятся
 

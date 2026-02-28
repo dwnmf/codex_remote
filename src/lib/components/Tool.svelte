@@ -3,7 +3,7 @@
   import { socket } from "../socket.svelte";
   import { anchors } from "../anchors.svelte";
   import { auth } from "../auth.svelte";
-  import type { Message } from "../types";
+  import type { FileChangeEntry, Message } from "../types";
 
   interface Props {
     message: Message;
@@ -17,9 +17,44 @@
   let imageLoading = $state(false);
   let imageError = $state<string | null>(null);
   let loadedImageKey = $state("");
+  let selectedFilePath = $state<string | null>(null);
+  let selectedFileView = $state<"diff" | "file">("diff");
+  let selectedFileContent = $state<string>("");
+  let selectedFileLoading = $state(false);
+  let selectedFileError = $state<string | null>(null);
+  let selectedFileTruncated = $state(false);
+  const filePreviewCache = new Map<string, { content: string; truncated: boolean }>();
 
   function toggle() {
     isOpen = !isOpen;
+  }
+
+  function countDiffLines(diff: string): { linesAdded: number; linesRemoved: number } {
+    let linesAdded = 0;
+    let linesRemoved = 0;
+    for (const line of diff.split("\n")) {
+      if (!line) continue;
+      if (line.startsWith("+++ ") || line.startsWith("--- ") || line.startsWith("@@")) continue;
+      if (line.startsWith("diff --git ") || line.startsWith("index ")) continue;
+      if (line.startsWith("\\ No newline")) continue;
+      if (line.startsWith("+")) linesAdded += 1;
+      else if (line.startsWith("-")) linesRemoved += 1;
+    }
+    return { linesAdded, linesRemoved };
+  }
+
+  function parseLegacyFileChange(text: string): FileChangeEntry[] {
+    const lines = text.split("\n");
+    const path = (lines[0] ?? "").trim();
+    if (!path) return [];
+    const diff = lines.slice(1).join("\n");
+    const stats = countDiffLines(diff);
+    return [{
+      path,
+      ...(diff ? { diff } : {}),
+      linesAdded: stats.linesAdded,
+      linesRemoved: stats.linesRemoved,
+    }];
   }
 
   // Tool configuration based on kind
@@ -66,9 +101,13 @@
     }
 
     if (kind === "file") {
-      const lines = text.split("\n");
-      const filePath = lines[0] || "File";
-      return { title: filePath, content: lines.slice(1).join("\n") };
+      const list = Array.isArray(message.metadata?.fileChanges)
+        ? message.metadata.fileChanges
+        : parseLegacyFileChange(text);
+      const title = list.length === 1
+        ? (list[0]?.path || "File")
+        : `File changes (${list.length})`;
+      return { title, content: "" };
     }
 
     if (kind === "mcp") {
@@ -121,8 +160,29 @@
   });
 
   const isImage = $derived(message.kind === "image");
+  const isFile = $derived(message.kind === "file");
+  const fileChanges = $derived.by(() => {
+    if (!isFile) return [] as FileChangeEntry[];
+    const direct = message.metadata?.fileChanges;
+    if (Array.isArray(direct) && direct.length > 0) return direct;
+    return parseLegacyFileChange(message.text);
+  });
+  const totalLinesAdded = $derived.by(() => {
+    if (typeof message.metadata?.linesAdded === "number") return message.metadata.linesAdded;
+    return fileChanges.reduce((sum, entry) => sum + (entry.linesAdded || 0), 0);
+  });
+  const totalLinesRemoved = $derived.by(() => {
+    if (typeof message.metadata?.linesRemoved === "number") return message.metadata.linesRemoved;
+    return fileChanges.reduce((sum, entry) => sum + (entry.linesRemoved || 0), 0);
+  });
+  const selectedFileChange = $derived.by(() => {
+    const list = fileChanges;
+    if (list.length === 0) return null;
+    if (!selectedFilePath) return list[0] ?? null;
+    return list.find((entry) => entry.path === selectedFilePath) ?? list[0] ?? null;
+  });
   const hasContent = $derived(toolInfo.content && toolInfo.content.trim().length > 0);
-  const hasBody = $derived(isImage || hasContent);
+  const hasBody = $derived(isImage || isFile || hasContent);
 
   const imagePath = $derived.by(() => {
     const path = message.metadata?.imagePath?.trim();
@@ -143,10 +203,45 @@
     return null;
   });
 
-  function resolveAnchorIdForImageRead(): string | undefined {
+  function resolveAnchorIdForAssetRead(): string | undefined {
     if (auth.isLocalMode) return undefined;
     const selected = anchors.selectedId?.trim();
     return selected ? selected : undefined;
+  }
+
+  function selectFileDiff(path: string): void {
+    selectedFilePath = path;
+    selectedFileView = "diff";
+    selectedFileError = null;
+  }
+
+  async function openFilePreview(path: string): Promise<void> {
+    selectedFilePath = path;
+    selectedFileView = "file";
+    selectedFileError = null;
+
+    const cached = filePreviewCache.get(path);
+    if (cached) {
+      selectedFileContent = cached.content;
+      selectedFileTruncated = cached.truncated;
+      selectedFileLoading = false;
+      return;
+    }
+
+    selectedFileLoading = true;
+    try {
+      const result = await socket.readFile(path, resolveAnchorIdForAssetRead());
+      filePreviewCache.set(path, { content: result.content, truncated: result.truncated });
+      selectedFileContent = result.content;
+      selectedFileTruncated = result.truncated;
+      selectedFileError = null;
+    } catch (err) {
+      selectedFileContent = "";
+      selectedFileTruncated = false;
+      selectedFileError = err instanceof Error ? err.message : "Failed to read file.";
+    } finally {
+      selectedFileLoading = false;
+    }
   }
 
   $effect(() => {
@@ -154,7 +249,7 @@
 
     const directUrl = inlineImageUrl;
     const path = imagePath;
-    const anchorId = resolveAnchorIdForImageRead();
+    const anchorId = resolveAnchorIdForAssetRead();
     const key = `${directUrl ?? ""}|${path ?? ""}|${anchorId ?? ""}`;
     if (loadedImageKey === key) return;
     loadedImageKey = key;
@@ -184,6 +279,14 @@
         imageLoading = false;
         imageError = err instanceof Error ? err.message : "Failed to load image.";
       });
+  });
+
+  $effect(() => {
+    if (!isFile || !isOpen) return;
+    if (!selectedFilePath && fileChanges.length > 0) {
+      selectedFilePath = fileChanges[0]?.path ?? null;
+      selectedFileView = "diff";
+    }
   });
 
   onDestroy(() => {
@@ -305,6 +408,73 @@
             </div>
           {:else}
             <div class="tool-image-status">Image unavailable.</div>
+          {/if}
+        </div>
+      {:else if isFile}
+        <div class="tool-file-content stack">
+          <div class="file-summary row">
+            <span class="file-summary-chip">Files {fileChanges.length}</span>
+            <span class="file-summary-chip add">+{totalLinesAdded}</span>
+            <span class="file-summary-chip remove">-{totalLinesRemoved}</span>
+          </div>
+
+          {#if fileChanges.length === 0}
+            <div class="tool-image-status">No file changes details available.</div>
+          {:else}
+            <div class="file-list stack">
+              {#each fileChanges as entry (entry.path)}
+                <div class="file-row row" class:selected={selectedFileChange?.path === entry.path}>
+                  <button class="file-path-btn" type="button" onclick={() => selectFileDiff(entry.path)}>
+                    {entry.path}
+                  </button>
+                  <span class="file-lines add">+{entry.linesAdded}</span>
+                  <span class="file-lines remove">-{entry.linesRemoved}</span>
+                  <button class="file-open-btn" type="button" onclick={() => void openFilePreview(entry.path)}>
+                    Open file
+                  </button>
+                </div>
+              {/each}
+            </div>
+
+            {#if selectedFileChange}
+              <div class="file-preview stack">
+                <div class="file-preview-header row">
+                  <span class="file-preview-title">{selectedFileChange.path}</span>
+                  <span class="file-preview-switch row">
+                    <button
+                      class:active={selectedFileView === "diff"}
+                      type="button"
+                      onclick={() => {
+                        selectedFileView = "diff";
+                        selectedFileError = null;
+                      }}
+                    >
+                      Diff
+                    </button>
+                    <button
+                      class:active={selectedFileView === "file"}
+                      type="button"
+                      onclick={() => void openFilePreview(selectedFileChange.path)}
+                    >
+                      File
+                    </button>
+                  </span>
+                </div>
+
+                {#if selectedFileView === "diff"}
+                  <pre class="tool-output">{selectedFileChange.diff || "No diff payload for this file."}</pre>
+                {:else if selectedFileLoading}
+                  <div class="tool-image-status">Loading file...</div>
+                {:else if selectedFileError}
+                  <div class="tool-image-status error">{selectedFileError}</div>
+                {:else}
+                  {#if selectedFileTruncated}
+                    <div class="tool-image-status">File is too large and was not loaded.</div>
+                  {/if}
+                  <pre class="tool-output">{selectedFileContent}</pre>
+                {/if}
+              </div>
+            {/if}
           {/if}
         </div>
       {:else}
@@ -437,6 +607,135 @@
   .tool-image-meta {
     color: var(--cli-text-muted);
     font-size: var(--text-xs);
+  }
+
+  .tool-file-content {
+    --stack-gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .file-summary {
+    --row-gap: var(--space-xs);
+    flex-wrap: wrap;
+  }
+
+  .file-summary-chip {
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-sm);
+    padding: 0.1rem 0.38rem;
+    color: var(--cli-text-dim);
+    font-size: var(--text-xs);
+  }
+
+  .file-summary-chip.add {
+    color: var(--cli-success);
+    border-color: color-mix(in srgb, var(--cli-success) 45%, var(--cli-border));
+  }
+
+  .file-summary-chip.remove {
+    color: var(--cli-error);
+    border-color: color-mix(in srgb, var(--cli-error) 45%, var(--cli-border));
+  }
+
+  .file-list {
+    --stack-gap: 0.35rem;
+  }
+
+  .file-row {
+    --row-gap: var(--space-xs);
+    border: 1px solid var(--cli-border);
+    border-radius: var(--radius-sm);
+    padding: 0.2rem 0.35rem;
+    align-items: center;
+  }
+
+  .file-row.selected {
+    border-color: color-mix(in srgb, var(--cli-text) 40%, var(--cli-border));
+    background: color-mix(in srgb, var(--cli-bg-elevated) 70%, transparent);
+  }
+
+  .file-path-btn {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--cli-text);
+    text-align: left;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .file-lines {
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+  }
+
+  .file-lines.add {
+    color: var(--cli-success);
+  }
+
+  .file-lines.remove {
+    color: var(--cli-error);
+  }
+
+  .file-open-btn {
+    border: 1px solid var(--cli-border);
+    background: transparent;
+    color: var(--cli-text-dim);
+    border-radius: var(--radius-sm);
+    padding: 0.16rem 0.4rem;
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+    cursor: pointer;
+  }
+
+  .file-open-btn:hover {
+    background: var(--cli-bg-hover);
+    color: var(--cli-text);
+  }
+
+  .file-preview {
+    --stack-gap: 0.35rem;
+  }
+
+  .file-preview-header {
+    --row-gap: var(--space-xs);
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .file-preview-title {
+    min-width: 0;
+    color: var(--cli-text);
+    font-size: var(--text-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .file-preview-switch {
+    --row-gap: var(--space-xs);
+  }
+
+  .file-preview-switch button {
+    border: 1px solid var(--cli-border);
+    background: transparent;
+    color: var(--cli-text-dim);
+    border-radius: var(--radius-sm);
+    padding: 0.1rem 0.4rem;
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+    cursor: pointer;
+  }
+
+  .file-preview-switch button.active {
+    color: var(--cli-bg);
+    background: var(--cli-text);
+    border-color: var(--cli-text);
   }
 
   @keyframes slideIn {
