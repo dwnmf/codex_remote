@@ -1,75 +1,83 @@
 # Self-Hosting
 
-Codex Remote can be fully self-hosted on your own Cloudflare account. The `codex-remote self-host` wizard automates the entire process, but this page explains what it does and what you need beforehand.
+Codex Remote can be fully self-hosted with either `cloudflare` or `deno` provider. The `codex-remote self-host` wizard automates deployment for both.
 
 ## Prerequisites
 
 - **macOS/Linux/Windows** with [Bun](https://bun.sh) and [Codex CLI](https://github.com/openai/codex) installed
-- **A Cloudflare account** (the [free tier](https://www.cloudflare.com/plans/) is sufficient)
+- One provider account:
+  - **Cloudflare** (free tier is enough)
+  - **Deno Deploy** (free tier is enough)
 - **Codex Remote installed** via the [install script](installation.md)
 
-The wizard uses [Wrangler](https://developers.cloudflare.com/workers/wrangler/) automatically: either your installed `wrangler` binary or managed mode via Bun (`bunx`).
+Provider runtimes used by the wizard:
+- `cloudflare`: [Wrangler](https://developers.cloudflare.com/workers/wrangler/) (installed or managed via Bun)
+- `deno`: `deployctl` (installed globally or run via `deno run -A jsr:@deno/deployctl`)
+  - authentication via `DENO_DEPLOY_TOKEN` (the wizard validates token access and can prompt for it)
+  - note: `deployctl` currently targets Deno Deploy Classic orgs
 
 ## What gets deployed
 
-The wizard deploys two services to your Cloudflare account:
+The wizard deploys:
 
 | Service | Platform | Purpose |
 |---------|----------|---------|
-| **Orbit** | Cloudflare Worker + Durable Object | Passkey auth, JWT issuance, WebSocket relay between devices and Anchor |
-| **Web** | Cloudflare Pages | Static Svelte frontend |
+| **Orbit** | Cloudflare Worker + Durable Object or Deno Deploy runtime | Passkey auth, JWT issuance, WebSocket relay between devices and Anchor |
+| **Web** | Cloudflare Pages or Deno Deploy static assets | Static Svelte frontend |
 
-It also creates a shared **D1 database** (SQLite) for auth sessions and passkey credentials.
+For `cloudflare`, the wizard also creates/uses shared **D1**.
+For `deno`, auth/session state is stored in **Deno KV**.
 
-Orbit uses two generated JWT secrets (`CODEX_REMOTE_WEB_JWT_SECRET` and `CODEX_REMOTE_ANCHOR_JWT_SECRET`) that are set as Cloudflare secrets automatically.
+Orbit uses generated JWT secrets for web/anchor flows. They are wired into provider deployment env automatically.
 
 ## Running the wizard
 
 ```bash
-codex-remote self-host
-# or force post-setup login:
-codex-remote self-host --login
+codex-remote self-host --provider cloudflare
+# or:
+codex-remote self-host --provider deno
+# force post-setup login:
+codex-remote self-host --provider deno --login
 ```
 
 You can run this either:
 
 1. During `install.sh` or `install.ps1` when prompted, or
-2. Later from your terminal with `codex-remote self-host`.
+2. Later from your terminal with `codex-remote self-host --provider ...`.
 
-The wizard walks through 10 steps:
+The provider wizard flow:
 
 1. Validates local project files and required tools
-2. Checks Bun + optional local tools (git/python), resolves Wrangler mode, and verifies Cloudflare login
-3. Creates (or reuses) the D1 database
-4. Updates `wrangler.toml` files with the database ID
-5. Generates JWT and VAPID secrets
-6. Runs database migrations
-7. Deploys the Orbit worker and sets secrets
-8. Builds and deploys the web frontend to Pages
-9. Sets `PASSKEY_ORIGIN` and VAPID secrets
-10. Writes the Anchor `.env` with Orbit URLs and database ID
+2. Checks Bun and provider tools (`wrangler` or `deployctl`)
+3. For `deno`, validates `DENO_DEPLOY_TOKEN` (from environment / `.env` / interactive prompt)
+4. Generates JWT and VAPID secrets
+5. Deploys Orbit backend
+6. Builds frontend with provider `AUTH_URL`
+7. Deploys static web
+8. Writes Anchor `.env` with provider-specific values
 
 At the end, it prints your deployment URLs and next steps.
 By default, `codex-remote self-host` then asks whether to run `codex-remote login`; use `--login` or `--no-login` to force behavior.
 
 ## Failure behavior
 
-`codex-remote self-host` now fails fast for critical deployment steps (migrations, worker deploy, Pages deploy, secret updates, final redeploy) and exits non-zero on failure.
+`codex-remote self-host` fails fast for critical deploy steps and exits non-zero on failure.
 
 If it fails, fix the reported issue and rerun `codex-remote self-host`. The flow is designed to be safely rerunnable.
 
 ## After deployment
 
-1. Open your Pages URL (printed by the wizard) and create your account
+1. Open your app URL (printed by the wizard) and create your account
 2. Run `codex-remote start` to connect your local Anchor to your self-hosted Orbit
 
 ## Updating a self-hosted deployment
 
-`codex-remote update` now redeploys web + orbit automatically when self-host settings are present in `.env`.
+`codex-remote update` redeploys web + orbit automatically for the selected provider (`SELF_HOST_PROVIDER` in `.env`).
 
-If `codex-remote update` fails on deploy, rerun the same command after fixing prerequisites (for example Wrangler auth), or redeploy manually:
+If `codex-remote update` fails, rerun after fixing prerequisites (for example provider auth), or redeploy manually:
 
 ```bash
+# Cloudflare manual redeploy example
 # Redeploy orbit worker
 (cd ~/.codex-remote/services/orbit && wrangler deploy)
 

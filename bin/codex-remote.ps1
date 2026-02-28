@@ -43,6 +43,11 @@ function Get-DefaultEnvContent() {
   return @(
     "# Codex Remote Anchor Configuration (self-host)"
     "# Run 'codex-remote self-host' to complete setup."
+    "SELF_HOST_PROVIDER="
+    "DENO_DEPLOY_PROJECT="
+    "DENO_DEPLOY_TOKEN="
+    "DENO_WEB_JWT_SECRET="
+    "DENO_ANCHOR_JWT_SECRET="
     "ANCHOR_PORT=8788"
     "ANCHOR_ORBIT_URL="
     "AUTH_URL="
@@ -92,6 +97,22 @@ function Test-Tool([string]$Name) {
 
 function Can-RunWrangler() {
   return (Test-Tool "wrangler") -or (Test-Tool "bunx") -or (Test-Tool "bun")
+}
+
+function Can-RunDeployctl() {
+  return (Test-Tool "deployctl") -or (Test-Tool "deno")
+}
+
+function Invoke-Deployctl([string[]]$DeployArgs) {
+  if (Test-Tool "deployctl") {
+    & deployctl @DeployArgs
+    return
+  }
+  if (Test-Tool "deno") {
+    & deno "run" "-A" "jsr:@deno/deployctl" @DeployArgs
+    return
+  }
+  throw "deployctl is unavailable (install deployctl or deno)."
 }
 
 function Invoke-Wrangler([string[]]$WranglerArgs) {
@@ -455,10 +476,8 @@ function Cmd-Update() {
   if (Test-Path $script:EnvFile) {
     $authUrl = Get-EnvValue "AUTH_URL"
     $vapidPublic = Get-EnvValue "VAPID_PUBLIC_KEY"
+    $provider = Get-EnvValue "SELF_HOST_PROVIDER" "cloudflare"
     if ($authUrl) {
-      if (-not (Can-RunWrangler)) {
-        throw "wrangler is unavailable. Install wrangler or bun."
-      }
       if (-not $vapidPublic) {
         throw "VAPID_PUBLIC_KEY is missing in $script:EnvFile. Run 'codex-remote self-host'."
       }
@@ -487,40 +506,93 @@ function Cmd-Update() {
         throw "Web build failed."
       }
 
-      Write-Host "Deploying web..."
-      Invoke-WithEnv @{ CI = "true" } {
-        Push-Location $script:CodexRemoteHome
-        try {
-          Invoke-Wrangler @("pages", "deploy", "dist", "--project-name", "codex-remote", "--commit-dirty=true")
+      if ($provider -eq "deno") {
+        $projectName = Get-EnvValue "DENO_DEPLOY_PROJECT" "codex-remote"
+        $denoWebSecret = Get-EnvValue "DENO_WEB_JWT_SECRET"
+        $denoAnchorSecret = Get-EnvValue "DENO_ANCHOR_JWT_SECRET"
+        $denoDeployToken = Get-EnvValue "DENO_DEPLOY_TOKEN"
+        if (-not $denoDeployToken) {
+          $denoDeployToken = [Environment]::GetEnvironmentVariable("DENO_DEPLOY_TOKEN", "Process")
         }
-        finally {
-          Pop-Location
-        }
-      }
-      if ($LASTEXITCODE -ne 0) {
-        throw "Pages deploy failed."
-      }
 
-      Write-Host "Deploying orbit..."
-      Invoke-Retry 3 3 "Orbit dependency install" {
+        if (-not $denoWebSecret -or -not $denoAnchorSecret) {
+          throw "Deno secrets are missing in $script:EnvFile. Run 'codex-remote self-host --provider deno'."
+        }
+        if (-not $denoDeployToken) {
+          throw "DENO_DEPLOY_TOKEN is missing in $script:EnvFile and process env. Run 'codex-remote self-host --provider deno'."
+        }
+        if (-not (Can-RunDeployctl)) {
+          throw "deployctl is unavailable. Install deployctl or deno."
+        }
+
+        Write-Host "Deploying app (deno provider)..."
+        Invoke-WithEnv @{ DENO_DEPLOY_TOKEN = $denoDeployToken } {
+          Push-Location $script:CodexRemoteHome
+          try {
+            Invoke-Deployctl @(
+              "deploy",
+              "--project=$projectName",
+              "--entrypoint=./services/orbit-deno/main.ts",
+              "--include=./services/orbit-deno/**",
+              "--include=./services/orbit/src/**",
+              "--include=./dist/**",
+              "--prod",
+              "--env=AUTH_MODE=passkey",
+              "--env=CODEX_REMOTE_WEB_JWT_SECRET=$denoWebSecret",
+              "--env=CODEX_REMOTE_ANCHOR_JWT_SECRET=$denoAnchorSecret",
+              "--env=PASSKEY_ORIGIN=$authUrl",
+              "--env=DEVICE_VERIFICATION_URL=$authUrl/device",
+              "--env=CORS_ORIGINS=$authUrl"
+            )
+          }
+          finally {
+            Pop-Location
+          }
+        }
+        if ($LASTEXITCODE -ne 0) {
+          throw "Deno deploy failed."
+        }
+      }
+      else {
+        if (-not (Can-RunWrangler)) {
+          throw "wrangler is unavailable. Install wrangler or bun."
+        }
+
+        Write-Host "Deploying web..."
+        Invoke-WithEnv @{ CI = "true" } {
+          Push-Location $script:CodexRemoteHome
+          try {
+            Invoke-Wrangler @("pages", "deploy", "dist", "--project-name", "codex-remote", "--commit-dirty=true")
+          }
+          finally {
+            Pop-Location
+          }
+        }
+        if ($LASTEXITCODE -ne 0) {
+          throw "Pages deploy failed."
+        }
+
+        Write-Host "Deploying orbit..."
+        Invoke-Retry 3 3 "Orbit dependency install" {
+          Push-Location (Join-Path $script:CodexRemoteHome "services/orbit")
+          try {
+            & bun install --silent
+          }
+          finally {
+            Pop-Location
+          }
+        }
+
         Push-Location (Join-Path $script:CodexRemoteHome "services/orbit")
         try {
-          & bun install --silent
+          Invoke-Wrangler @("deploy")
         }
         finally {
           Pop-Location
         }
-      }
-
-      Push-Location (Join-Path $script:CodexRemoteHome "services/orbit")
-      try {
-        Invoke-Wrangler @("deploy")
-      }
-      finally {
-        Pop-Location
-      }
-      if ($LASTEXITCODE -ne 0) {
-        throw "Orbit deploy failed."
+        if ($LASTEXITCODE -ne 0) {
+          throw "Orbit deploy failed."
+        }
       }
     }
   }
@@ -530,20 +602,38 @@ function Cmd-Update() {
 
 function Cmd-SelfHost([string[]]$CommandArgs = @()) {
   $loginMode = "ask"
-  foreach ($arg in $CommandArgs) {
-    switch ($arg) {
-      "--login" { $loginMode = "always"; break }
-      "--no-login" { $loginMode = "never"; break }
-      default { throw "Unknown option for self-host: $arg. Usage: codex-remote self-host [--login|--no-login]" }
+  $provider = "cloudflare"
+  for ($i = 0; $i -lt $CommandArgs.Length; $i++) {
+    $arg = $CommandArgs[$i]
+    switch -Regex ($arg) {
+      "^--login$" { $loginMode = "always"; continue }
+      "^--no-login$" { $loginMode = "never"; continue }
+      "^--provider=(.+)$" { $provider = $Matches[1]; continue }
+      "^--provider$" {
+        if ($i -ge ($CommandArgs.Length - 1)) {
+          throw "Missing value for --provider (cloudflare|deno)."
+        }
+        $i++
+        $provider = $CommandArgs[$i]
+        continue
+      }
+      default { throw "Unknown option for self-host: $arg. Usage: codex-remote self-host [--provider cloudflare|deno] [--login|--no-login]" }
     }
   }
 
-  $scriptPath = Join-Path $script:CodexRemoteHome "bin/self-host.ps1"
+  $scriptName = switch ($provider) {
+    "cloudflare" { "self-host.ps1" }
+    "deno" { "self-host-deno.ps1" }
+    default { throw "Unsupported provider '$provider'. Use cloudflare or deno." }
+  }
+
+  $scriptPath = Join-Path $script:CodexRemoteHome "bin/$scriptName"
   if (-not (Test-Path $scriptPath)) {
     throw "self-host wizard not found at $scriptPath"
   }
   # Ensure self-host script uses the same resolved home as this CLI invocation.
   $env:CODEX_REMOTE_HOME = $script:CodexRemoteHome
+  $env:CODEX_REMOTE_SELF_HOST_PROVIDER = $provider
   $env:CODEX_REMOTE_SELF_HOST_LOGIN_MODE = $loginMode
   & $scriptPath
   if ($LASTEXITCODE -ne 0) {
@@ -626,7 +716,7 @@ function Cmd-Help() {
   Write-Host "  config      Open .env in your editor"
   Write-Host "  update      Pull latest code and reinstall dependencies"
   Write-Host "  self-host   Run the self-host setup wizard"
-  Write-Host "              Options: --login (run login after setup), --no-login (skip post-setup login)"
+  Write-Host "              Options: --provider cloudflare|deno, --login, --no-login"
   Write-Host "  uninstall   Remove Codex Remote from your system"
   Write-Host "  version     Print version"
   Write-Host "  help        Show this help"

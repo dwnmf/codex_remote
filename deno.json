@@ -1,0 +1,14 @@
+{
+  "deploy": {
+    "project": "f2f3d51b-ff99-4917-9285-43a66f6a81d4",
+    "exclude": [
+      "**/node_modules"
+    ],
+    "include": [
+      "services/orbit-deno/**",
+      "services/orbit/src/**",
+      "dist/**"
+    ],
+    "entrypoint": "services/orbit-deno/main.ts"
+  }
+}

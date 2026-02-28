@@ -24,7 +24,7 @@ Codex Remote состоит из трёх частей:
         |
         | HTTPS + WebSocket
         v
-Orbit (Cloudflare)
+Orbit (Cloudflare / Deno Deploy)
         ^
         | WebSocket
         v
@@ -60,7 +60,9 @@ codex app-server
   - `release`: установка из prebuilt GitHub Release (без `git` и `bun` на клиенте)
   По умолчанию `auto`: если нет `git`/`bun`, выбирается `release`.
 - Инсталлер проверяет `Codex CLI` и запускает `codex login`.
-- Для self-host режима: аккаунт Cloudflare (wrangler используется автоматически через установленный `wrangler` или managed-режим через Bun).
+- Для self-host режима: выберите провайдера:
+  - `cloudflare` (через `wrangler`)
+  - `deno` (через `deployctl` + `DENO_DEPLOY_TOKEN`)
 
 ### 2) Установка
 
@@ -92,7 +94,9 @@ codex-remote start
 Для self-host:
 
 ```bash
-codex-remote self-host --login
+codex-remote self-host --provider cloudflare --login
+# или
+codex-remote self-host --provider deno --login
 codex-remote start
 ```
 
@@ -112,7 +116,7 @@ CODEX_REMOTE_RUN_SELF_HOST=1 curl -fsSL https://raw.githubusercontent.com/dwnmf/
 
 ### Self-host (рекомендуется)
 
-- Полный контроль над инфраструктурой в вашем Cloudflare.
+- Полный контроль над инфраструктурой (Cloudflare или Deno Deploy).
 - Аутентификация и уведомления работают из коробки после `codex-remote self-host`.
 
 ### Local mode (без Cloudflare)
@@ -147,7 +151,7 @@ bun run dev -- --host 0.0.0.0
 | `codex-remote doctor` | Проверка окружения и конфигурации |
 | `codex-remote config` | Открыть `.env` в редакторе |
 | `codex-remote update` | Обновить код и зависимости |
-| `codex-remote self-host [--login\|--no-login]` | Мастер self-host развёртывания + опциональный post-setup login |
+| `codex-remote self-host [--provider cloudflare\|deno] [--login\|--no-login]` | Мастер self-host развёртывания + выбор провайдера + опциональный post-setup login |
 | `codex-remote uninstall` | Удалить Codex Remote |
 | `codex-remote version` | Показать версию |
 | `codex-remote help` | Справка по командам |

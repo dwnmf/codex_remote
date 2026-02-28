@@ -60,7 +60,7 @@ Add `~/.codex-remote/bin` to your PATH.
 
 ## Setup
 
-1. If you skipped deployment during install, run `codex-remote self-host --login` (or `codex-remote self-host` and confirm login when prompted)
+1. If you skipped deployment during install, run `codex-remote self-host --provider cloudflare --login` (or `--provider deno`)
 2. Run `codex-remote start` (or `codex-remote login` to re-authenticate)
 3. A device code is displayed in your terminal
 4. A browser window opens to enter the code
@@ -84,7 +84,7 @@ Anchor connects to Orbit and waits for commands from the web client. Open the Co
 | `codex-remote doctor` | Check prerequisites and configuration |
 | `codex-remote config` | Open `.env` in your editor |
 | `codex-remote update` | Pull latest code and reinstall dependencies |
-| `codex-remote self-host [--login\|--no-login]` | Run the self-host setup wizard and control post-setup login |
+| `codex-remote self-host [--provider cloudflare\|deno] [--login\|--no-login]` | Run the self-host setup wizard, choose provider, and control post-setup login |
 | `codex-remote uninstall` | Remove Codex Remote from your system |
 | `codex-remote version` | Print version |
 | `codex-remote help` | Show help |
@@ -104,14 +104,16 @@ This checks for Bun, Codex CLI, Anchor source, dependencies, `.env` configuratio
 codex-remote update
 ```
 
-This resets local repo changes, pulls the latest code, reinstalls Anchor dependencies, and redeploys Cloudflare services when self-host settings are present.
+This resets local repo changes, pulls the latest code, reinstalls Anchor dependencies, and redeploys self-host services (Cloudflare or Deno) when self-host settings are present.
 
 ## Self-hosting
 
-To deploy the entire stack to your own Cloudflare account:
+To deploy the entire stack to your own provider:
 
 ```bash
-codex-remote self-host
+codex-remote self-host --provider cloudflare
+# or:
+codex-remote self-host --provider deno
 ```
 
 See the [self-hosting guide](self-hosting.md) for prerequisites and a full walkthrough.

@@ -1,4 +1,4 @@
-import { asRecord, extractAnchorId, extractMethod, extractThreadId, extractTurnId } from "../utils/protocol";
+import { asRecord, extractAnchorId, extractMethod, extractThreadId, extractTurnId } from "../orbit/src/utils/protocol.ts";
 
 export const MAX_STORED_THREADS = 200;
 export const MAX_RECENT_MESSAGES = 60;

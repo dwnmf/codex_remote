@@ -594,6 +594,10 @@ step "9. Configuring anchor"
 tmp_env_file=$(mktemp "$CODEX_REMOTE_HOME/.env.tmp.XXXXXX") || abort "Failed to prepare temporary .env file."
 cat > "$tmp_env_file" <<ENVEOF
 # Codex Remote Anchor Configuration (self-host)
+SELF_HOST_PROVIDER=cloudflare
+DENO_DEPLOY_PROJECT=
+DENO_WEB_JWT_SECRET=
+DENO_ANCHOR_JWT_SECRET=
 ANCHOR_PORT=8788
 ANCHOR_ORBIT_URL=${orbit_ws_url}
 AUTH_URL=${orbit_url}

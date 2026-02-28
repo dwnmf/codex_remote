@@ -34,6 +34,11 @@ default_env_content() {
   cat <<'EOF'
 # Codex Remote Anchor Configuration (self-host)
 # Run 'codex-remote self-host' to complete setup.
+SELF_HOST_PROVIDER=
+DENO_DEPLOY_PROJECT=
+DENO_DEPLOY_TOKEN=
+DENO_WEB_JWT_SECRET=
+DENO_ANCHOR_JWT_SECRET=
 ANCHOR_PORT=8788
 ANCHOR_ORBIT_URL=
 AUTH_URL=
@@ -66,6 +71,23 @@ can_run_wrangler() {
   command -v wrangler &>/dev/null || command -v bunx &>/dev/null || command -v bun &>/dev/null
 }
 
+can_run_deployctl() {
+  command -v deployctl &>/dev/null || command -v deno &>/dev/null
+}
+
+run_deployctl() {
+  if command -v deployctl &>/dev/null; then
+    deployctl "$@"
+    return $?
+  fi
+  if command -v deno &>/dev/null; then
+    deno run -A jsr:@deno/deployctl "$@"
+    return $?
+  fi
+  echo "Error: deployctl is unavailable (install deployctl or deno)."
+  return 127
+}
+
 run_wrangler() {
   if command -v wrangler &>/dev/null; then
     wrangler "$@"
@@ -88,6 +110,14 @@ wrangler_tty() {
     run_wrangler "$@" < /dev/tty
   else
     run_wrangler "$@"
+  fi
+}
+
+deployctl_tty() {
+  if [[ -r /dev/tty ]]; then
+    run_deployctl "$@" < /dev/tty
+  else
+    run_deployctl "$@"
   fi
 }
 
@@ -349,13 +379,12 @@ cmd_update() {
   if [[ -f "$ENV_FILE" ]]; then
     local auth_url
     local vapid_public_key
+    local provider
     auth_url=$(grep -E '^AUTH_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
     vapid_public_key=$(grep -E '^VAPID_PUBLIC_KEY=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+    provider=$(grep -E '^SELF_HOST_PROVIDER=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+    provider="${provider:-cloudflare}"
     if [[ -n "$auth_url" ]]; then
-      if ! can_run_wrangler; then
-        echo "Error: wrangler is unavailable. Install wrangler or bun."
-        exit 1
-      fi
       if [[ -z "$vapid_public_key" ]]; then
         echo "Error: VAPID_PUBLIC_KEY is missing in $ENV_FILE."
         echo "Run 'codex-remote self-host' to regenerate and persist push settings."
@@ -368,15 +397,61 @@ cmd_update() {
       (cd "$CODEX_REMOTE_HOME" && AUTH_URL="$auth_url" VAPID_PUBLIC_KEY="$vapid_public_key" bun run build) \
         || { echo "Error: Web build failed."; exit 1; }
 
-      echo "Deploying web..."
-      (cd /tmp && CI=true wrangler_tty pages deploy "$CODEX_REMOTE_HOME/dist" --project-name codex-remote --commit-dirty=true) \
-        || { echo "Error: Pages deploy failed."; exit 1; }
+      if [[ "$provider" == "deno" ]]; then
+        local project_name deno_web_secret deno_anchor_secret deno_deploy_token
+        project_name=$(grep -E '^DENO_DEPLOY_PROJECT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+        deno_web_secret=$(grep -E '^DENO_WEB_JWT_SECRET=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+        deno_anchor_secret=$(grep -E '^DENO_ANCHOR_JWT_SECRET=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+        deno_deploy_token=$(grep -E '^DENO_DEPLOY_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+        deno_deploy_token="${deno_deploy_token:-${DENO_DEPLOY_TOKEN:-}}"
+        project_name="${project_name:-codex-remote}"
 
-      echo "Deploying orbit..."
-      retry_cmd 3 3 "Orbit dependency install" bash -c 'cd "$1" && bun install --silent' _ "$CODEX_REMOTE_HOME/services/orbit" \
-        || { echo "Error: Failed to install Orbit dependencies."; exit 1; }
-      (cd "$CODEX_REMOTE_HOME/services/orbit" && wrangler_tty deploy) \
-        || { echo "Error: Orbit deploy failed."; exit 1; }
+        if [[ -z "$deno_web_secret" || -z "$deno_anchor_secret" ]]; then
+          echo "Error: Deno secrets are missing in $ENV_FILE."
+          echo "Run 'codex-remote self-host --provider deno' to regenerate deployment config."
+          exit 1
+        fi
+        if [[ -z "$deno_deploy_token" ]]; then
+          echo "Error: DENO_DEPLOY_TOKEN is missing."
+          echo "Set DENO_DEPLOY_TOKEN in $ENV_FILE or rerun 'codex-remote self-host --provider deno'."
+          exit 1
+        fi
+        if ! can_run_deployctl; then
+          echo "Error: deployctl is unavailable. Install deployctl or deno."
+          exit 1
+        fi
+
+        echo "Deploying app (deno provider)..."
+        (cd "$CODEX_REMOTE_HOME" && DENO_DEPLOY_TOKEN="$deno_deploy_token" deployctl_tty deploy \
+          --project="$project_name" \
+          --entrypoint=./services/orbit-deno/main.ts \
+          --include=./services/orbit-deno/** \
+          --include=./services/orbit/src/** \
+          --include=./dist/** \
+          --prod \
+          --env="AUTH_MODE=passkey" \
+          --env="CODEX_REMOTE_WEB_JWT_SECRET=$deno_web_secret" \
+          --env="CODEX_REMOTE_ANCHOR_JWT_SECRET=$deno_anchor_secret" \
+          --env="PASSKEY_ORIGIN=$auth_url" \
+          --env="DEVICE_VERIFICATION_URL=$auth_url/device" \
+          --env="CORS_ORIGINS=$auth_url") \
+          || { echo "Error: Deno deploy failed."; exit 1; }
+      else
+        if ! can_run_wrangler; then
+          echo "Error: wrangler is unavailable. Install wrangler or bun."
+          exit 1
+        fi
+
+        echo "Deploying web..."
+        (cd /tmp && CI=true wrangler_tty pages deploy "$CODEX_REMOTE_HOME/dist" --project-name codex-remote --commit-dirty=true) \
+          || { echo "Error: Pages deploy failed."; exit 1; }
+
+        echo "Deploying orbit..."
+        retry_cmd 3 3 "Orbit dependency install" bash -c 'cd "$1" && bun install --silent' _ "$CODEX_REMOTE_HOME/services/orbit" \
+          || { echo "Error: Failed to install Orbit dependencies."; exit 1; }
+        (cd "$CODEX_REMOTE_HOME/services/orbit" && wrangler_tty deploy) \
+          || { echo "Error: Orbit deploy failed."; exit 1; }
+      fi
     fi
   fi
 
@@ -385,24 +460,41 @@ cmd_update() {
 
 cmd_self_host() {
   local login_mode="ask"
+  local provider="cloudflare"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --login) login_mode="always" ;;
       --no-login) login_mode="never" ;;
+      --provider)
+        shift
+        [[ $# -gt 0 ]] || { echo "Error: --provider requires a value (cloudflare|deno)"; exit 1; }
+        provider="$1"
+        ;;
+      --provider=*) provider="${1#--provider=}" ;;
       *)
         echo "Error: unknown option for self-host: $1"
-        echo "Usage: codex-remote self-host [--login|--no-login]"
+        echo "Usage: codex-remote self-host [--provider cloudflare|deno] [--login|--no-login]"
         exit 1
         ;;
     esac
     shift
   done
 
-  local script="$CODEX_REMOTE_HOME/bin/self-host.sh"
+  local script=""
+  case "$provider" in
+    cloudflare) script="$CODEX_REMOTE_HOME/bin/self-host.sh" ;;
+    deno) script="$CODEX_REMOTE_HOME/bin/self-host-deno.sh" ;;
+    *)
+      echo "Error: unsupported provider '$provider'. Use cloudflare or deno."
+      exit 1
+      ;;
+  esac
+
   if [[ ! -f "$script" ]]; then
     echo "Error: self-host wizard not found at $script"
     exit 1
   fi
+  export CODEX_REMOTE_SELF_HOST_PROVIDER="$provider"
   export CODEX_REMOTE_SELF_HOST_LOGIN_MODE="$login_mode"
   # shellcheck source=/dev/null
   source "$script"
@@ -483,7 +575,7 @@ cmd_help() {
   echo "  config      Open .env in your editor"
   echo "  update      Pull latest code and reinstall dependencies"
   echo "  self-host   Run the self-host setup wizard"
-  echo "              Options: --login (run login after setup), --no-login (skip post-setup login)"
+  echo "              Options: --provider cloudflare|deno, --login, --no-login"
   echo "  uninstall   Remove Codex Remote from your system"
   echo "  version     Print version"
   echo "  help        Show this help"

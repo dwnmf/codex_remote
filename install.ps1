@@ -460,7 +460,16 @@ Ensure-Path $binDir
 Ensure-EnvFile $CodexRemoteHome
 
 Write-Step "Self-host setup"
-$selfHostScript = Join-Path $binDir "self-host.ps1"
+$provider = if ($env:CODEX_REMOTE_SELF_HOST_PROVIDER) { $env:CODEX_REMOTE_SELF_HOST_PROVIDER } else { "cloudflare" }
+$selfHostScript = switch ($provider) {
+  "cloudflare" { Join-Path $binDir "self-host.ps1" }
+  "deno" { Join-Path $binDir "self-host-deno.ps1" }
+  default {
+    Write-WarnLine "Unsupported CODEX_REMOTE_SELF_HOST_PROVIDER='$provider'. Falling back to cloudflare."
+    $provider = "cloudflare"
+    Join-Path $binDir "self-host.ps1"
+  }
+}
 if (-not (Test-Path $selfHostScript)) {
   Write-WarnLine "Self-host wizard not found at $selfHostScript"
   Write-WarnLine "Run 'codex-remote self-host' after installation."
@@ -470,6 +479,7 @@ elseif ($RunSelfHost) {
     Write-WarnLine "self-host requires bun for build/deploy steps. Install bun first, then rerun 'codex-remote self-host'."
   }
   else {
+    $env:CODEX_REMOTE_SELF_HOST_PROVIDER = $provider
     & $selfHostScript
   }
 }

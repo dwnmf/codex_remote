@@ -271,13 +271,23 @@ pass "Added to PATH in$added_to"
 
 # ── Self-host setup ────────────────────────────
 step "Self-host setup"
-local_wizard="$CODEX_REMOTE_HOME/bin/self-host.sh"
+provider="${CODEX_REMOTE_SELF_HOST_PROVIDER:-cloudflare}"
+case "$provider" in
+  cloudflare) local_wizard="$CODEX_REMOTE_HOME/bin/self-host.sh" ;;
+  deno) local_wizard="$CODEX_REMOTE_HOME/bin/self-host-deno.sh" ;;
+  *)
+    warn "Unsupported CODEX_REMOTE_SELF_HOST_PROVIDER='$provider'. Falling back to cloudflare."
+    provider="cloudflare"
+    local_wizard="$CODEX_REMOTE_HOME/bin/self-host.sh"
+    ;;
+esac
 if [[ ! -f "$local_wizard" ]]; then
   warn "Self-host wizard not found at $local_wizard"
   ensure_env_file
   warn "Run 'codex-remote self-host' after installation."
 elif [[ "$CODEX_REMOTE_RUN_SELF_HOST" == "1" ]]; then
-  printf "  ${DIM}Deploying to your Cloudflare account...${RESET}\n"
+  printf "  ${DIM}Deploying with provider '%s'...${RESET}\n" "$provider"
+  export CODEX_REMOTE_SELF_HOST_PROVIDER="$provider"
   # shellcheck source=/dev/null
   source "$local_wizard"
 else
