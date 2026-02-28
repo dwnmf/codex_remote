@@ -352,7 +352,7 @@ create_pages_project() {
 }
 
 deploy_pages() {
-  (cd "$CODEX_REMOTE_HOME" && CI=true wrangler_tty pages deploy dist --project-name codex-remote --commit-dirty=true)
+  (cd "$CODEX_REMOTE_HOME" && CI=true wrangler_tty pages deploy dist --project-name codex-remote --branch main --commit-dirty=true)
 }
 
 # ── Preflight ────────────────────────────────────
@@ -565,6 +565,7 @@ if ! is_https_url "$pages_url"; then
   warn "Could not detect a valid web URL from deploy output."
   prompt_for_required_url pages_url "  Enter your Pages URL (e.g. https://codex-remote-xxx.pages.dev): "
 fi
+pages_url=$(normalize_pages_url "$pages_url")
 
 pass "Web deployed: $pages_url"
 

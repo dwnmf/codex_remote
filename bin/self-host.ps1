@@ -537,7 +537,7 @@ $pagesOutput = ""
 Invoke-WithEnv @{ CI = "true" } {
   Push-Location $script:CodexRemoteHome
   try {
-    $script:pagesOutput = (Invoke-Wrangler @("pages", "deploy", "dist", "--project-name", "codex-remote", "--commit-dirty=true") 2>&1 | Out-String)
+    $script:pagesOutput = (Invoke-Wrangler @("pages", "deploy", "dist", "--project-name", "codex-remote", "--branch", "main", "--commit-dirty=true") 2>&1 | Out-String)
   }
   finally {
     Pop-Location
@@ -556,6 +556,7 @@ if (-not (Is-HttpsUrl $pagesUrl)) {
   Write-WarnLine "Could not detect a valid web URL from deploy output."
   $pagesUrl = Prompt-RequiredHttps "Enter your Pages URL (https://...pages.dev)"
 }
+$pagesUrl = Normalize-PagesUrl $pagesUrl
 Write-Pass "Web deployed: $pagesUrl"
 
 Write-Step "8. Setting PASSKEY_ORIGIN and push secrets"

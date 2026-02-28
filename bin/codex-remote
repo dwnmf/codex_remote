@@ -463,7 +463,7 @@ cmd_update() {
         fi
 
         echo "Deploying web..."
-        (cd /tmp && CI=true wrangler_tty pages deploy "$CODEX_REMOTE_HOME/dist" --project-name codex-remote --commit-dirty=true) \
+        (cd /tmp && CI=true wrangler_tty pages deploy "$CODEX_REMOTE_HOME/dist" --project-name codex-remote --branch main --commit-dirty=true) \
           || { echo "Error: Pages deploy failed."; exit 1; }
 
         echo "Deploying orbit..."

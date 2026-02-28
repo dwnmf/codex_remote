@@ -585,7 +585,7 @@ function Cmd-Update() {
         Invoke-WithEnv @{ CI = "true" } {
           Push-Location $script:CodexRemoteHome
           try {
-            Invoke-Wrangler @("pages", "deploy", "dist", "--project-name", "codex-remote", "--commit-dirty=true")
+            Invoke-Wrangler @("pages", "deploy", "dist", "--project-name", "codex-remote", "--branch", "main", "--commit-dirty=true")
           }
           finally {
             Pop-Location
