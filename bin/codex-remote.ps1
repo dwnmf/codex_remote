@@ -90,6 +90,37 @@ function Test-Tool([string]$Name) {
   return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Can-RunWrangler() {
+  return (Test-Tool "wrangler") -or (Test-Tool "bunx") -or (Test-Tool "bun")
+}
+
+function Invoke-Wrangler([string[]]$WranglerArgs) {
+  if (Test-Tool "wrangler") {
+    & wrangler @WranglerArgs
+    return
+  }
+  if (Test-Tool "bunx") {
+    & bunx "--bun" "wrangler" @WranglerArgs
+    return
+  }
+  if (Test-Tool "bun") {
+    & bun "x" "wrangler" @WranglerArgs
+    return
+  }
+  throw "wrangler is unavailable (install wrangler or bun)."
+}
+
+function Prompt-YesDefault([string]$Prompt) {
+  try {
+    $answer = Read-Host "$Prompt [Y/n]"
+  }
+  catch {
+    return $false
+  }
+  if (-not $answer) { return $true }
+  return $answer -match "^[Yy]"
+}
+
 function Read-EnvFileMap([string]$Path) {
   $map = @{}
   if (-not (Test-Path $Path)) {
@@ -425,8 +456,8 @@ function Cmd-Update() {
     $authUrl = Get-EnvValue "AUTH_URL"
     $vapidPublic = Get-EnvValue "VAPID_PUBLIC_KEY"
     if ($authUrl) {
-      if (-not (Test-Tool "wrangler")) {
-        throw "wrangler not found. Install with: bun add -g wrangler"
+      if (-not (Can-RunWrangler)) {
+        throw "wrangler is unavailable. Install wrangler or bun."
       }
       if (-not $vapidPublic) {
         throw "VAPID_PUBLIC_KEY is missing in $script:EnvFile. Run 'codex-remote self-host'."
@@ -460,7 +491,7 @@ function Cmd-Update() {
       Invoke-WithEnv @{ CI = "true" } {
         Push-Location $script:CodexRemoteHome
         try {
-          & wrangler pages deploy dist --project-name codex-remote --commit-dirty=true
+          Invoke-Wrangler @("pages", "deploy", "dist", "--project-name", "codex-remote", "--commit-dirty=true")
         }
         finally {
           Pop-Location
@@ -483,7 +514,7 @@ function Cmd-Update() {
 
       Push-Location (Join-Path $script:CodexRemoteHome "services/orbit")
       try {
-        & wrangler deploy
+        Invoke-Wrangler @("deploy")
       }
       finally {
         Pop-Location
@@ -497,15 +528,42 @@ function Cmd-Update() {
   Write-Host "Done."
 }
 
-function Cmd-SelfHost() {
+function Cmd-SelfHost([string[]]$CommandArgs = @()) {
+  $loginMode = "ask"
+  foreach ($arg in $CommandArgs) {
+    switch ($arg) {
+      "--login" { $loginMode = "always"; break }
+      "--no-login" { $loginMode = "never"; break }
+      default { throw "Unknown option for self-host: $arg. Usage: codex-remote self-host [--login|--no-login]" }
+    }
+  }
+
   $scriptPath = Join-Path $script:CodexRemoteHome "bin/self-host.ps1"
   if (-not (Test-Path $scriptPath)) {
     throw "self-host wizard not found at $scriptPath"
   }
   # Ensure self-host script uses the same resolved home as this CLI invocation.
   $env:CODEX_REMOTE_HOME = $script:CodexRemoteHome
+  $env:CODEX_REMOTE_SELF_HOST_LOGIN_MODE = $loginMode
   & $scriptPath
-  exit $LASTEXITCODE
+  if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+  }
+
+  $runLogin = $false
+  switch ($loginMode) {
+    "always" { $runLogin = $true; break }
+    "never" { $runLogin = $false; break }
+    default { $runLogin = Prompt-YesDefault "Run 'codex-remote login' now?" }
+  }
+
+  if ($runLogin) {
+    Write-Host "Launching login..."
+    Cmd-Login
+    return
+  }
+
+  Write-Host "Skipped login. Run 'codex-remote login' any time."
 }
 
 function Cmd-Uninstall() {
@@ -568,6 +626,7 @@ function Cmd-Help() {
   Write-Host "  config      Open .env in your editor"
   Write-Host "  update      Pull latest code and reinstall dependencies"
   Write-Host "  self-host   Run the self-host setup wizard"
+  Write-Host "              Options: --login (run login after setup), --no-login (skip post-setup login)"
   Write-Host "  uninstall   Remove Codex Remote from your system"
   Write-Host "  version     Print version"
   Write-Host "  help        Show this help"
@@ -576,6 +635,7 @@ function Cmd-Help() {
 
 try {
   $command = if ($args.Length -gt 0) { $args[0].ToLowerInvariant() } else { "help" }
+  $commandArgs = if ($args.Length -gt 1) { $args[1..($args.Length - 1)] } else { @() }
 
   switch ($command) {
     "start" { Cmd-Start; break }
@@ -583,7 +643,7 @@ try {
     "doctor" { Cmd-Doctor; break }
     "config" { Cmd-Config; break }
     "update" { Cmd-Update; break }
-    "self-host" { Cmd-SelfHost; break }
+    "self-host" { Cmd-SelfHost -CommandArgs $commandArgs; break }
     "uninstall" { Cmd-Uninstall; break }
     "version" { Cmd-Version; break }
     "help" { Cmd-Help; break }

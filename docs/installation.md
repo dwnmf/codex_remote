@@ -60,7 +60,7 @@ Add `~/.codex-remote/bin` to your PATH.
 
 ## Setup
 
-1. If you skipped deployment during install, run `codex-remote self-host`
+1. If you skipped deployment during install, run `codex-remote self-host --login` (or `codex-remote self-host` and confirm login when prompted)
 2. Run `codex-remote start` (or `codex-remote login` to re-authenticate)
 3. A device code is displayed in your terminal
 4. A browser window opens to enter the code
@@ -84,7 +84,7 @@ Anchor connects to Orbit and waits for commands from the web client. Open the Co
 | `codex-remote doctor` | Check prerequisites and configuration |
 | `codex-remote config` | Open `.env` in your editor |
 | `codex-remote update` | Pull latest code and reinstall dependencies |
-| `codex-remote self-host` | Run the self-host setup wizard |
+| `codex-remote self-host [--login\|--no-login]` | Run the self-host setup wizard and control post-setup login |
 | `codex-remote uninstall` | Remove Codex Remote from your system |
 | `codex-remote version` | Print version |
 | `codex-remote help` | Show help |

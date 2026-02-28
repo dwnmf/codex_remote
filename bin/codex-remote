@@ -62,12 +62,44 @@ ensure_env_file() {
   default_env_content > "$ENV_FILE"
 }
 
+can_run_wrangler() {
+  command -v wrangler &>/dev/null || command -v bunx &>/dev/null || command -v bun &>/dev/null
+}
+
+run_wrangler() {
+  if command -v wrangler &>/dev/null; then
+    wrangler "$@"
+    return $?
+  fi
+  if command -v bunx &>/dev/null; then
+    bunx --bun wrangler "$@"
+    return $?
+  fi
+  if command -v bun &>/dev/null; then
+    bun x wrangler "$@"
+    return $?
+  fi
+  echo "Error: wrangler is unavailable (install wrangler or bun)."
+  return 127
+}
+
 wrangler_tty() {
   if [[ -r /dev/tty ]]; then
-    wrangler "$@" < /dev/tty
+    run_wrangler "$@" < /dev/tty
   else
-    wrangler "$@"
+    run_wrangler "$@"
   fi
+}
+
+confirm_yes_default() {
+  local prompt="$1"
+  local answer=""
+  if [[ ! -r /dev/tty ]]; then
+    return 1
+  fi
+  printf "%s [Y/n] " "$prompt" > /dev/tty
+  read -r answer < /dev/tty || return 1
+  [[ -z "$answer" || "$answer" =~ ^[Yy] ]]
 }
 
 retry_cmd() {
@@ -320,8 +352,8 @@ cmd_update() {
     auth_url=$(grep -E '^AUTH_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
     vapid_public_key=$(grep -E '^VAPID_PUBLIC_KEY=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
     if [[ -n "$auth_url" ]]; then
-      if ! command -v wrangler &>/dev/null; then
-        echo "Error: wrangler not found. Install with: bun add -g wrangler"
+      if ! can_run_wrangler; then
+        echo "Error: wrangler is unavailable. Install wrangler or bun."
         exit 1
       fi
       if [[ -z "$vapid_public_key" ]]; then
@@ -352,13 +384,46 @@ cmd_update() {
 }
 
 cmd_self_host() {
+  local login_mode="ask"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --login) login_mode="always" ;;
+      --no-login) login_mode="never" ;;
+      *)
+        echo "Error: unknown option for self-host: $1"
+        echo "Usage: codex-remote self-host [--login|--no-login]"
+        exit 1
+        ;;
+    esac
+    shift
+  done
+
   local script="$CODEX_REMOTE_HOME/bin/self-host.sh"
   if [[ ! -f "$script" ]]; then
     echo "Error: self-host wizard not found at $script"
     exit 1
   fi
+  export CODEX_REMOTE_SELF_HOST_LOGIN_MODE="$login_mode"
   # shellcheck source=/dev/null
   source "$script"
+
+  local should_login=0
+  case "$login_mode" in
+    always) should_login=1 ;;
+    never) should_login=0 ;;
+    *)
+      if confirm_yes_default "Run 'codex-remote login' now?"; then
+        should_login=1
+      fi
+      ;;
+  esac
+
+  if [[ $should_login -eq 1 ]]; then
+    echo "Launching login..."
+    cmd_login
+  else
+    echo "Skipped login. Run 'codex-remote login' any time."
+  fi
 }
 
 cmd_uninstall() {
@@ -418,6 +483,7 @@ cmd_help() {
   echo "  config      Open .env in your editor"
   echo "  update      Pull latest code and reinstall dependencies"
   echo "  self-host   Run the self-host setup wizard"
+  echo "              Options: --login (run login after setup), --no-login (skip post-setup login)"
   echo "  uninstall   Remove Codex Remote from your system"
   echo "  version     Print version"
   echo "  help        Show this help"
@@ -432,7 +498,7 @@ case "${1:-help}" in
   doctor)     cmd_doctor ;;
   config)     cmd_config ;;
   update)     cmd_update ;;
-  self-host)  cmd_self_host ;;
+  self-host)  shift; cmd_self_host "$@" ;;
   uninstall)  cmd_uninstall ;;
   version)    cmd_version ;;
   help|--help|-h) cmd_help ;;

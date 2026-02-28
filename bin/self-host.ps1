@@ -45,33 +45,95 @@ function Test-Tool([string]$Name) {
   return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
-function Refresh-PathForBunGlobalTools() {
-  $bunGlobalBin = ""
-  try {
-    $bunGlobalBin = ((& bun pm bin -g 2>$null) | Select-Object -First 1).Trim()
-  }
-  catch {
-    return
-  }
-
-  if (-not $bunGlobalBin) {
-    return
-  }
-
-  $entries = ($env:Path -split ";") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
-  $normalizedTarget = $bunGlobalBin.TrimEnd('\').ToLowerInvariant()
-  $hasEntry = $entries | Where-Object { $_.TrimEnd('\').ToLowerInvariant() -eq $normalizedTarget }
-  if (-not $hasEntry) {
-    $env:Path = "$bunGlobalBin;$env:Path"
-  }
-
-  $ExecutionContext.SessionState.Applications.Clear()
-}
-
 function Confirm-Yes([string]$Prompt) {
   $answer = Read-Host "$Prompt [Y/n]"
   if (-not $answer) { return $true }
   return $answer -match "^[Yy]"
+}
+
+function Can-RunWrangler() {
+  return (Test-Tool "wrangler") -or (Test-Tool "bunx") -or (Test-Tool "bun")
+}
+
+function Invoke-Wrangler([string[]]$WranglerArgs) {
+  if (Test-Tool "wrangler") {
+    & wrangler @WranglerArgs
+    return
+  }
+  if (Test-Tool "bunx") {
+    & bunx "--bun" "wrangler" @WranglerArgs
+    return
+  }
+  if (Test-Tool "bun") {
+    & bun "x" "wrangler" @WranglerArgs
+    return
+  }
+  Abort "wrangler is unavailable (install wrangler or bun)."
+}
+
+function Invoke-WranglerWithInput([string]$InputValue, [string[]]$WranglerArgs) {
+  if (Test-Tool "wrangler") {
+    $InputValue | & wrangler @WranglerArgs
+    return
+  }
+  if (Test-Tool "bunx") {
+    $InputValue | & bunx "--bun" "wrangler" @WranglerArgs
+    return
+  }
+  if (Test-Tool "bun") {
+    $InputValue | & bun "x" "wrangler" @WranglerArgs
+    return
+  }
+  Abort "wrangler is unavailable (install wrangler or bun)."
+}
+
+function Ensure-PathEntry([string]$Target) {
+  if (-not $Target) { return }
+  $entries = ($env:Path -split ";") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+  $normalized = $Target.TrimEnd('\').ToLowerInvariant()
+  $exists = $entries | Where-Object { $_.TrimEnd('\').ToLowerInvariant() -eq $normalized }
+  if (-not $exists) {
+    $env:Path = "$Target;$env:Path"
+  }
+}
+
+function Ensure-Bun() {
+  if (Test-Tool "bun") {
+    Write-Pass "bun $(& bun --version)"
+    return
+  }
+
+  Write-WarnLine "bun not found"
+  if (-not (Confirm-Yes "Install bun automatically now?")) {
+    Abort "bun is required. Install bun and rerun this wizard."
+  }
+
+  $installCommand = "irm bun.sh/install.ps1|iex"
+  & powershell -NoProfile -ExecutionPolicy Bypass -Command $installCommand
+  if ($LASTEXITCODE -ne 0) {
+    Abort "Failed to install bun via bun.sh installer."
+  }
+
+  foreach ($candidate in @((Join-Path $HOME ".bun\bin"), (Join-Path $env:USERPROFILE ".bun\bin"))) {
+    if ($candidate -and (Test-Path $candidate)) {
+      Ensure-PathEntry $candidate
+    }
+  }
+
+  if (-not (Test-Tool "bun")) {
+    Abort "bun installation completed but bun is still unavailable in PATH."
+  }
+
+  Write-Pass "bun $(& bun --version)"
+}
+
+function Check-OptionalTool([string]$Name, [string]$Label) {
+  if (Test-Tool $Name) {
+    Write-Pass "$Label installed"
+  }
+  else {
+    Write-WarnLine "$Label not found (optional)"
+  }
 }
 
 function Invoke-Retry([int]$Attempts, [int]$DelaySeconds, [string]$Description, [scriptblock]$Action) {
@@ -95,7 +157,7 @@ function Invoke-Retry([int]$Attempts, [int]$DelaySeconds, [string]$Description, 
 }
 
 function Ensure-CloudflareAuth() {
-  & wrangler whoami | Out-Null
+  Invoke-Wrangler @("whoami") | Out-Null
   if ($LASTEXITCODE -eq 0) {
     Write-Pass "Cloudflare authenticated"
     return
@@ -103,12 +165,12 @@ function Ensure-CloudflareAuth() {
 
   Write-WarnLine "Not logged in to Cloudflare"
   Write-Host "  Running 'wrangler login'..."
-  & wrangler login
+  Invoke-Wrangler @("login")
   if ($LASTEXITCODE -ne 0) {
     Abort "Cloudflare login failed."
   }
 
-  & wrangler whoami | Out-Null
+  Invoke-Wrangler @("whoami") | Out-Null
   if ($LASTEXITCODE -ne 0) {
     Abort "Cloudflare authentication failed after login."
   }
@@ -189,6 +251,12 @@ function Update-DatabaseIdToml([string]$TomlPath, [string]$DatabaseId) {
   }
 }
 
+function Generate-JwtSecret() {
+  $bytes = New-Object byte[] 32
+  [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+  return [Convert]::ToBase64String($bytes)
+}
+
 function Generate-VapidKeys() {
   $output = & bun --silent -e @'
 const keyPair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
@@ -219,7 +287,7 @@ console.log(`VAPID_PRIVATE_KEY=${privateJwk.d ?? ""}`);
 }
 
 function Get-OrCreateDatabaseId() {
-  $dbListJson = & wrangler d1 list --json 2>$null
+  $dbListJson = (Invoke-Wrangler @("d1", "list", "--json") 2>$null | Out-String)
   if ($LASTEXITCODE -ne 0) {
     Abort "Failed to list D1 databases."
   }
@@ -242,7 +310,7 @@ function Get-OrCreateDatabaseId() {
     return $dbId
   }
 
-  $createOutput = (& wrangler d1 create codex-remote 2>&1 | Out-String)
+  $createOutput = (Invoke-Wrangler @("d1", "create", "codex-remote") 2>&1 | Out-String)
   if ($LASTEXITCODE -ne 0) {
     Abort "Could not create D1 database 'codex-remote'. Output:`n$createOutput"
   }
@@ -252,7 +320,7 @@ function Get-OrCreateDatabaseId() {
     return $uuidMatch.Value
   }
 
-  $retryListJson = & wrangler d1 list --json 2>$null
+  $retryListJson = (Invoke-Wrangler @("d1", "list", "--json") 2>$null | Out-String)
   if ($LASTEXITCODE -eq 0) {
     try {
       $retryList = $retryListJson | ConvertFrom-Json
@@ -282,7 +350,7 @@ function Set-OrbitSecret([string]$Name, [string]$Value) {
     $lastOut = ""
     for ($attempt = 1; $attempt -le 3; $attempt++) {
       try {
-        $lastOut = ($Value | wrangler versions secret put $Name 2>&1 | Out-String)
+        $lastOut = (Invoke-WranglerWithInput -InputValue $Value -WranglerArgs @("versions", "secret", "put", $Name) 2>&1 | Out-String)
         if ($LASTEXITCODE -eq 0 -and -not (Has-WranglerErrorOutput $lastOut)) {
           $ok = $true
           break
@@ -297,6 +365,13 @@ function Set-OrbitSecret([string]$Name, [string]$Value) {
       }
     }
     if (-not $ok) {
+      $lastOut = (Invoke-WranglerWithInput -InputValue $Value -WranglerArgs @("secret", "put", $Name) 2>&1 | Out-String)
+      if ($LASTEXITCODE -eq 0 -and -not (Has-WranglerErrorOutput $lastOut)) {
+        $ok = $true
+      }
+    }
+
+    if (-not $ok) {
       Abort "Failed to set orbit secret: $Name`n$lastOut"
     }
   }
@@ -310,7 +385,7 @@ function Set-OrbitSecret([string]$Name, [string]$Value) {
 function Deploy-Orbit() {
   Push-Location $script:OrbitDir
   try {
-    $output = (& wrangler deploy 2>&1 | Out-String)
+    $output = (Invoke-Wrangler @("deploy") 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 0 -or (Has-WranglerErrorOutput $output)) {
       Abort "Orbit deploy failed.`n$output"
     }
@@ -327,22 +402,41 @@ if (-not (Test-Path $script:OrbitDir)) { Abort "Orbit service not found at $scri
 if (-not (Test-Path $script:RootWranglerToml)) { Abort "Missing $script:RootWranglerToml" }
 if (-not (Test-Path $script:OrbitWranglerToml)) { Abort "Missing $script:OrbitWranglerToml" }
 if (-not (Test-Path $script:MigrationsDir)) { Abort "Missing migrations directory at $script:MigrationsDir" }
-if (-not (Test-Tool "bun")) { Abort "bun is required. Install bun and rerun this wizard." }
-if (-not (Test-Tool "openssl")) { Abort "openssl is required to generate secrets." }
 Write-Pass "Local files verified"
 
 Write-Step "1. Checking prerequisites"
-if (-not (Test-Tool "wrangler")) {
-  Write-WarnLine "wrangler not found"
-  if (Confirm-Yes "Install wrangler globally via bun?") {
-    Invoke-Retry 3 3 "wrangler install" { & bun add -g wrangler }
-    Refresh-PathForBunGlobalTools
-  }
-  else {
-    Abort "wrangler is required. Run: bun add -g wrangler"
-  }
+if ($IsWindows) {
+  Write-Pass "Windows detected"
 }
-Write-Pass "wrangler installed"
+else {
+  Write-Pass "PowerShell environment detected"
+}
+
+Ensure-Bun
+Check-OptionalTool "git" "git"
+if ((Test-Tool "python") -or (Test-Tool "python3")) {
+  Write-Pass "python installed"
+}
+else {
+  Write-WarnLine "python not found (optional)"
+}
+
+if (Test-Tool "openssl") {
+  Write-Pass "openssl installed (optional)"
+}
+else {
+  Write-WarnLine "openssl not found (not required, secrets are generated internally)"
+}
+
+if (-not (Can-RunWrangler)) {
+  Abort "wrangler is unavailable. Install wrangler or bun."
+}
+if (Test-Tool "wrangler") {
+  Write-Pass "wrangler installed"
+}
+else {
+  Write-Pass "wrangler will run via bunx (managed mode)"
+}
 
 Ensure-CloudflareAuth
 
@@ -360,8 +454,8 @@ Update-DatabaseIdToml $script:OrbitWranglerToml $databaseId
 Write-Pass "Updated orbit wrangler.toml"
 
 Write-Step "4. Generating secrets"
-$webJwtSecret = (& openssl rand -base64 32).Trim()
-$anchorJwtSecret = (& openssl rand -base64 32).Trim()
+$webJwtSecret = Generate-JwtSecret
+$anchorJwtSecret = Generate-JwtSecret
 $vapid = Generate-VapidKeys
 $vapidSubject = "mailto:admin@codex-remote.invalid"
 Write-Pass "CODEX_REMOTE_WEB_JWT_SECRET generated"
@@ -371,7 +465,7 @@ Write-Pass "VAPID keypair generated"
 Write-Step "5. Running database migrations"
 Push-Location $script:CodexRemoteHome
 try {
-  & wrangler d1 migrations apply codex-remote --remote
+  Invoke-Wrangler @("d1", "migrations", "apply", "codex-remote", "--remote")
 }
 finally {
   Pop-Location
@@ -429,7 +523,7 @@ if ($LASTEXITCODE -ne 0) {
 Invoke-WithEnv @{ CI = "true" } {
   Push-Location $script:CodexRemoteHome
   try {
-    & wrangler pages project create codex-remote --production-branch main | Out-Null
+    Invoke-Wrangler @("pages", "project", "create", "codex-remote", "--production-branch", "main") | Out-Null
   }
   finally {
     Pop-Location
@@ -443,7 +537,7 @@ $pagesOutput = ""
 Invoke-WithEnv @{ CI = "true" } {
   Push-Location $script:CodexRemoteHome
   try {
-    $script:pagesOutput = (& wrangler pages deploy dist --project-name codex-remote --commit-dirty=true 2>&1 | Out-String)
+    $script:pagesOutput = (Invoke-Wrangler @("pages", "deploy", "dist", "--project-name", "codex-remote", "--commit-dirty=true") 2>&1 | Out-String)
   }
   finally {
     Pop-Location

@@ -8,7 +8,7 @@ Codex Remote can be fully self-hosted on your own Cloudflare account. The `codex
 - **A Cloudflare account** (the [free tier](https://www.cloudflare.com/plans/) is sufficient)
 - **Codex Remote installed** via the [install script](installation.md)
 
-The wizard will install [Wrangler](https://developers.cloudflare.com/workers/wrangler/) (the Cloudflare CLI) and prompt you to log in if needed.
+The wizard uses [Wrangler](https://developers.cloudflare.com/workers/wrangler/) automatically: either your installed `wrangler` binary or managed mode via Bun (`bunx`).
 
 ## What gets deployed
 
@@ -27,6 +27,8 @@ Orbit uses two generated JWT secrets (`CODEX_REMOTE_WEB_JWT_SECRET` and `CODEX_R
 
 ```bash
 codex-remote self-host
+# or force post-setup login:
+codex-remote self-host --login
 ```
 
 You can run this either:
@@ -37,7 +39,7 @@ You can run this either:
 The wizard walks through 10 steps:
 
 1. Validates local project files and required tools
-2. Checks for Wrangler and Cloudflare login
+2. Checks Bun + optional local tools (git/python), resolves Wrangler mode, and verifies Cloudflare login
 3. Creates (or reuses) the D1 database
 4. Updates `wrangler.toml` files with the database ID
 5. Generates JWT and VAPID secrets
@@ -48,6 +50,7 @@ The wizard walks through 10 steps:
 10. Writes the Anchor `.env` with Orbit URLs and database ID
 
 At the end, it prints your deployment URLs and next steps.
+By default, `codex-remote self-host` then asks whether to run `codex-remote login`; use `--login` or `--no-login` to force behavior.
 
 ## Failure behavior
 
