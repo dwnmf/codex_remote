@@ -1,7 +1,11 @@
 import type {
   AnchorFileReadResult,
   ConnectionStatus,
+  GitCommitResult,
   GitInspectResult,
+  GitPushResult,
+  GitRevertResult,
+  GitStatusResult,
   GitWorktreeCreateParams,
   GitWorktreeCreateResult,
   GitWorktreeListResult,
@@ -309,6 +313,17 @@ class SocketStore {
     );
   }
 
+  gitStatus(path: string, anchorId?: string): Promise<GitStatusResult> {
+    return this.#requestRpc<GitStatusResult>(
+      "anchor.git.status",
+      {
+        path,
+        ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+      },
+      "git-status",
+    );
+  }
+
   gitWorktreeList(repoRoot: string): Promise<GitWorktreeListResult> {
     return this.#requestRpc<GitWorktreeListResult>(
       "anchor.git.worktree.list",
@@ -338,6 +353,51 @@ class SocketStore {
       "anchor.git.worktree.prune",
       { repoRoot },
       "git-worktree-prune",
+    );
+  }
+
+  gitCommit(
+    repoRoot: string,
+    message: string,
+    stageAll = true,
+    anchorId?: string,
+    paths?: string[],
+  ): Promise<GitCommitResult> {
+    return this.#requestRpc<GitCommitResult>(
+      "anchor.git.commit",
+      {
+        repoRoot,
+        message,
+        stageAll,
+        ...(Array.isArray(paths) && paths.length > 0 ? { paths } : {}),
+        ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+      },
+      "git-commit",
+    );
+  }
+
+  gitPush(repoRoot: string, remote?: string, branch?: string, anchorId?: string): Promise<GitPushResult> {
+    return this.#requestRpc<GitPushResult>(
+      "anchor.git.push",
+      {
+        repoRoot,
+        ...(remote?.trim() ? { remote: remote.trim() } : {}),
+        ...(branch?.trim() ? { branch: branch.trim() } : {}),
+        ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+      },
+      "git-push",
+    );
+  }
+
+  gitRevert(repoRoot: string, anchorId?: string, paths?: string[]): Promise<GitRevertResult> {
+    return this.#requestRpc<GitRevertResult>(
+      "anchor.git.revert",
+      {
+        repoRoot,
+        ...(Array.isArray(paths) && paths.length > 0 ? { paths } : {}),
+        ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+      },
+      "git-revert",
     );
   }
 

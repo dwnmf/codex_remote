@@ -9,11 +9,11 @@ $defaultHome = Join-Path $HOME ".codex-remote"
 $script:CodexRemoteHome = if ($env:CODEX_REMOTE_HOME) {
   $env:CODEX_REMOTE_HOME
 }
-elseif (Test-Path (Join-Path $defaultHome "services/orbit")) {
-  $defaultHome
-}
 elseif (Test-Path (Join-Path $script:RepoRoot "services/orbit")) {
   $script:RepoRoot
+}
+elseif (Test-Path (Join-Path $defaultHome "services/orbit")) {
+  $defaultHome
 }
 else {
   $defaultHome

@@ -6,16 +6,22 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 DEFAULT_HOME="${HOME}/.codex-remote"
 if [[ -n "${CODEX_REMOTE_HOME:-}" ]]; then
   CODEX_REMOTE_HOME="$CODEX_REMOTE_HOME"
-elif [[ -d "$DEFAULT_HOME/services/anchor" ]]; then
-  CODEX_REMOTE_HOME="$DEFAULT_HOME"
 elif [[ -d "$REPO_ROOT/services/anchor" ]]; then
   CODEX_REMOTE_HOME="$REPO_ROOT"
+elif [[ -d "$DEFAULT_HOME/services/anchor" ]]; then
+  CODEX_REMOTE_HOME="$DEFAULT_HOME"
 else
   CODEX_REMOTE_HOME="$DEFAULT_HOME"
 fi
 ANCHOR_DIR="$CODEX_REMOTE_HOME/services/anchor"
 ENV_FILE="$CODEX_REMOTE_HOME/.env"
-CREDENTIALS_FILE="$CODEX_REMOTE_HOME/credentials.json"
+GLOBAL_CREDENTIALS_FILE="$DEFAULT_HOME/credentials.json"
+LOCAL_CREDENTIALS_FILE="$CODEX_REMOTE_HOME/credentials.json"
+if [[ -n "${CODEX_REMOTE_CREDENTIALS_FILE:-}" ]]; then
+  CREDENTIALS_FILE="$CODEX_REMOTE_CREDENTIALS_FILE"
+else
+  CREDENTIALS_FILE="$GLOBAL_CREDENTIALS_FILE"
+fi
 
 # ── Colors ──────────────────────────────────────
 RED='\033[0;31m'
@@ -39,6 +45,7 @@ DENO_DEPLOY_PROJECT=
 DENO_DEPLOY_TOKEN=
 DENO_WEB_JWT_SECRET=
 DENO_ANCHOR_JWT_SECRET=
+CODEX_REMOTE_ANCHOR_JWT_SECRET=
 ANCHOR_PORT=8788
 ANCHOR_ORBIT_URL=
 AUTH_URL=
@@ -197,6 +204,11 @@ cmd_start() {
     exit 1
   fi
 
+  mkdir -p "$(dirname "$CREDENTIALS_FILE")"
+  if [[ "$CREDENTIALS_FILE" != "$LOCAL_CREDENTIALS_FILE" && ! -f "$CREDENTIALS_FILE" && -f "$LOCAL_CREDENTIALS_FILE" ]]; then
+    cp "$LOCAL_CREDENTIALS_FILE" "$CREDENTIALS_FILE"
+  fi
+
   CODEX_REMOTE_CREDENTIALS_FILE="$CREDENTIALS_FILE" exec bun --env-file "$ENV_FILE" "$ANCHOR_DIR/src/index.ts"
 }
 
@@ -211,6 +223,11 @@ cmd_login() {
   if [[ ! -f "$ANCHOR_DIR/src/index.ts" ]]; then
     echo "Error: Anchor service not found at $ANCHOR_DIR"
     exit 1
+  fi
+
+  mkdir -p "$(dirname "$CREDENTIALS_FILE")"
+  if [[ "$CREDENTIALS_FILE" != "$LOCAL_CREDENTIALS_FILE" && ! -f "$CREDENTIALS_FILE" && -f "$LOCAL_CREDENTIALS_FILE" ]]; then
+    cp "$LOCAL_CREDENTIALS_FILE" "$CREDENTIALS_FILE"
   fi
 
   CODEX_REMOTE_FORCE_LOGIN=1 CODEX_REMOTE_CREDENTIALS_FILE="$CREDENTIALS_FILE" exec bun --env-file "$ENV_FILE" "$ANCHOR_DIR/src/index.ts"
@@ -402,6 +419,9 @@ cmd_update() {
         project_name=$(grep -E '^DENO_DEPLOY_PROJECT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
         deno_web_secret=$(grep -E '^DENO_WEB_JWT_SECRET=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
         deno_anchor_secret=$(grep -E '^DENO_ANCHOR_JWT_SECRET=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+        if [[ -z "$deno_anchor_secret" ]]; then
+          deno_anchor_secret=$(grep -E '^CODEX_REMOTE_ANCHOR_JWT_SECRET=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+        fi
         deno_deploy_token=$(grep -E '^DENO_DEPLOY_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
         deno_deploy_token="${deno_deploy_token:-${DENO_DEPLOY_TOKEN:-}}"
         project_name="${project_name:-codex-remote}"

@@ -245,8 +245,27 @@ deploy_deno() {
   (cd "$CODEX_REMOTE_HOME" && deployctl_tty "${args[@]}")
 }
 
-extract_deno_url() {
-  grep -oE 'https://[^ ]+\.(deno\.dev|deno\.net)' | head -1 || true
+extract_deno_urls() {
+  grep -oE 'https://[^ ]+\.(deno\.dev|deno\.net)' | awk '!seen[$0]++' || true
+}
+
+select_canonical_deno_url() {
+  local project_name="$1"
+  local fallback_url="$2"
+  local urls="$3"
+  local project_url="https://${project_name,,}.deno.dev"
+
+  if echo "$urls" | grep -Fxq "$project_url"; then
+    printf "%s" "$project_url"
+    return 0
+  fi
+
+  if [[ -n "$fallback_url" ]] && echo "$urls" | grep -Fxq "$fallback_url"; then
+    printf "%s" "$fallback_url"
+    return 0
+  fi
+
+  printf "%s" "$urls" | head -1
 }
 
 step "0. Validating local setup"
@@ -272,8 +291,17 @@ fi
 pass "Project: $project_name"
 
 step "3. Generating secrets"
-web_jwt_secret="$(generate_jwt_secret)"
-anchor_jwt_secret="$(generate_jwt_secret)"
+web_jwt_secret="$(read_env_value "DENO_WEB_JWT_SECRET")"
+if [[ -z "$web_jwt_secret" ]]; then
+  web_jwt_secret="$(generate_jwt_secret)"
+fi
+anchor_jwt_secret="$(read_env_value "DENO_ANCHOR_JWT_SECRET")"
+if [[ -z "$anchor_jwt_secret" ]]; then
+  anchor_jwt_secret="$(read_env_value "CODEX_REMOTE_ANCHOR_JWT_SECRET")"
+fi
+if [[ -z "$anchor_jwt_secret" ]]; then
+  anchor_jwt_secret="$(generate_jwt_secret)"
+fi
 vapid_output="$(generate_vapid_keys)"
 vapid_public_key=$(echo "$vapid_output" | grep '^VAPID_PUBLIC_KEY=' | cut -d= -f2- || true)
 [[ -n "$vapid_public_key" ]] || abort "Failed to generate VAPID public key."
@@ -287,7 +315,8 @@ fi
 bootstrap_output="$RETRY_LAST_OUTPUT"
 echo "$bootstrap_output"
 
-orbit_url=$(echo "$bootstrap_output" | extract_deno_url)
+bootstrap_urls="$(echo "$bootstrap_output" | extract_deno_urls)"
+orbit_url="$(select_canonical_deno_url "$project_name" "" "$bootstrap_urls")"
 if ! is_https_url "$orbit_url"; then
   warn "Could not detect deployment URL from output."
   printf "  Enter deployment URL (https://...): "
@@ -312,9 +341,10 @@ fi
 final_output="$RETRY_LAST_OUTPUT"
 echo "$final_output"
 
-final_url=$(echo "$final_output" | extract_deno_url)
-if is_https_url "$final_url"; then
-  orbit_url="$final_url"
+final_urls="$(echo "$final_output" | extract_deno_urls)"
+selected_final_url="$(select_canonical_deno_url "$project_name" "$orbit_url" "$final_urls")"
+if is_https_url "$selected_final_url"; then
+  orbit_url="$selected_final_url"
 fi
 
 step "7. Configuring anchor"
@@ -328,6 +358,7 @@ DENO_DEPLOY_PROJECT=${project_name}
 DENO_DEPLOY_TOKEN=${DENO_DEPLOY_TOKEN}
 DENO_WEB_JWT_SECRET=${web_jwt_secret}
 DENO_ANCHOR_JWT_SECRET=${anchor_jwt_secret}
+CODEX_REMOTE_ANCHOR_JWT_SECRET=${anchor_jwt_secret}
 ANCHOR_PORT=8788
 ANCHOR_ORBIT_URL=${orbit_ws_url}
 AUTH_URL=${orbit_url}
@@ -349,4 +380,4 @@ printf "  ${BOLD}WS:${RESET}    %s\n" "$orbit_ws_url"
 echo ""
 echo "  Next steps:"
 printf "    1. Open ${BOLD}%s${RESET} and create your account\n" "$orbit_url"
-printf "    2. Run ${BOLD}codex-remote start${RESET}\n"
+printf "    2. Run ${BOLD}%s/bin/codex-remote start${RESET}\n" "$CODEX_REMOTE_HOME"

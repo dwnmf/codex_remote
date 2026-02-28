@@ -25,6 +25,7 @@
     import WorkingStatus from "../lib/components/WorkingStatus.svelte";
     import Reasoning from "../lib/components/Reasoning.svelte";
     import PromptInput from "../lib/components/PromptInput.svelte";
+    import GitStatusPanel from "../lib/components/GitStatusPanel.svelte";
     import ArtifactsTimeline from "../lib/components/ArtifactsTimeline.svelte";
 
     const themeIcons = { system: "◐", light: "○", dark: "●" } as const;
@@ -42,9 +43,31 @@
     const threadArtifacts = $derived(artifactsStore.getThreadArtifacts(threadId));
     const artifactsLoading = $derived(artifactsStore.getThreadLoading(threadId));
     const artifactsError = $derived(artifactsStore.getThreadError(threadId));
+    const persistedProjectPath = $derived(threads.getProjectPath(threadId));
     const selectedModelOption = $derived(models.options.find((option) => option.value === model) ?? null);
     const threadShortId = $derived(threadId ? threadId.slice(0, 8) : "--------");
     let lastArtifactsRequestKey: string | null = null;
+    const selectedAnchorId = $derived(auth.isLocalMode ? undefined : anchors.selectedId ?? undefined);
+    const gitAutoRefreshKey = $derived.by(() => {
+        const lastMessageId = messages.current.length > 0
+            ? messages.current[messages.current.length - 1]?.id ?? ""
+            : "";
+        return `${threadId ?? ""}:${lastMessageId}:${messages.turnStatus ?? ""}`;
+    });
+    const suggestedRepoPath = $derived.by(() => {
+        const persisted = persistedProjectPath.trim();
+        if (persisted) return persisted;
+        for (let i = messages.current.length - 1; i >= 0; i -= 1) {
+            const msg = messages.current[i];
+            const fileChanges = msg.metadata?.fileChanges;
+            if (!Array.isArray(fileChanges)) continue;
+            for (const entry of fileChanges) {
+                const candidate = typeof entry?.path === "string" ? entry.path.trim() : "";
+                if (/^[A-Za-z]:\\/.test(candidate) || candidate.startsWith("/")) return candidate;
+            }
+        }
+        return "";
+    });
     const threadStatusLabel = $derived.by(() => {
         if (socket.status === "connected") return "Live";
         if (socket.status === "connecting") return "Connecting";
@@ -107,7 +130,7 @@
             lastArtifactsRequestKey = null;
             return;
         }
-        const anchorId = auth.isLocalMode ? undefined : anchors.selectedId ?? undefined;
+        const anchorId = selectedAnchorId;
         const requestKey = `${threadId}:${anchorId ?? "local"}`;
         if (lastArtifactsRequestKey === requestKey) return;
         lastArtifactsRequestKey = requestKey;
@@ -290,7 +313,7 @@
         if (!threadId) return;
         void artifactsStore.requestThread(
             threadId,
-            auth.isLocalMode ? undefined : anchors.selectedId ?? undefined,
+            selectedAnchorId,
         );
     }
 
@@ -460,6 +483,18 @@
                     />
                 </div>
             </section>
+
+            <GitStatusPanel
+                {threadId}
+                initialPath={suggestedRepoPath}
+                anchorId={selectedAnchorId}
+                autoRefreshKey={gitAutoRefreshKey}
+                onResolvedRepoPath={(repoRoot) => {
+                    if (threadId) {
+                        threads.setProjectPath(threadId, repoRoot);
+                    }
+                }}
+            />
 
             <ArtifactsTimeline
                 {threadId}

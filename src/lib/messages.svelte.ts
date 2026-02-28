@@ -74,6 +74,15 @@ function normalizeFileChanges(changes: unknown): {
   return { text, entries, linesAdded, linesRemoved };
 }
 
+function sanitizeCliOutput(value: string): string {
+  if (!value) return value;
+  let cleaned = value;
+  cleaned = cleaned.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "");
+  cleaned = cleaned.replace(/\[(?:\d{1,3};?)+m/g, "");
+  cleaned = cleaned.replace(/\[(?:\d{1,3};?)+[GJK]/g, "");
+  return cleaned;
+}
+
 class MessagesStore {
   #byThread = $state<Map<string, Message[]>>(new Map());
   #streamingText = $state<Map<string, string>>(new Map());
@@ -941,7 +950,7 @@ class MessagesStore {
       const waitingLine = command ? `(waiting for ${command})` : "(waiting for command output)";
       const waitId = `terminal-wait-${key}`;
       const messageId = `terminal-${key}`;
-      const trimmed = stdin.replace(/\r?\n$/, "");
+      const trimmed = sanitizeCliOutput(stdin).replace(/\r?\n$/, "");
 
       if (!stdin) {
         this.#upsert(threadId, {
@@ -963,7 +972,7 @@ class MessagesStore {
 
     // Command execution output delta (streaming)
     if (method === "item/commandExecution/outputDelta") {
-      const delta = (params.delta as string) || "";
+      const delta = sanitizeCliOutput((params.delta as string) || "");
       const itemId = (params.itemId as string) || (params.item_id as string) || `cmd-${threadId}`;
       this.#updateStreamingTool(threadId, itemId, delta, "command");
       return;
@@ -971,7 +980,7 @@ class MessagesStore {
 
     // File change output delta (streaming)
     if (method === "item/fileChange/outputDelta") {
-      const delta = (params.delta as string) || "";
+      const delta = sanitizeCliOutput((params.delta as string) || "");
       const itemId = (params.itemId as string) || (params.item_id as string) || `file-${threadId}`;
       this.#updateStreamingTool(threadId, itemId, delta, "file");
       return;
@@ -1173,7 +1182,7 @@ class MessagesStore {
           return;
         case "commandExecution": {
           const command = (item.command as string) || "";
-          const output = (item.aggregatedOutput as string) || "";
+          const output = sanitizeCliOutput((item.aggregatedOutput as string) || "");
           const text = command ? `$ ${command}\n${output}` : output;
           const exitCode = typeof item.exitCode === "number" ? item.exitCode : null;
           this.#upsert(threadId, {
@@ -1309,7 +1318,7 @@ class MessagesStore {
 
           case "commandExecution": {
             const command = (item.command as string) || "";
-            const output = (item.aggregatedOutput as string) || "";
+            const output = sanitizeCliOutput((item.aggregatedOutput as string) || "");
             const exitCode = typeof item.exitCode === "number" ? item.exitCode : null;
             messages.push({
               id,

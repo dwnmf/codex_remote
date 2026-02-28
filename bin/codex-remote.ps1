@@ -6,14 +6,15 @@ $ErrorActionPreference = "Stop"
 $script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:RepoRoot = Split-Path -Parent $script:ScriptDir
 $defaultHome = Join-Path $HOME ".codex-remote"
+$script:DefaultHome = $defaultHome
 $script:CodexRemoteHome = if ($env:CODEX_REMOTE_HOME) {
   $env:CODEX_REMOTE_HOME
 }
-elseif (Test-Path (Join-Path $defaultHome "services/anchor")) {
-  $defaultHome
-}
 elseif (Test-Path (Join-Path $script:RepoRoot "services/anchor")) {
   $script:RepoRoot
+}
+elseif (Test-Path (Join-Path $defaultHome "services/anchor")) {
+  $defaultHome
 }
 else {
   $defaultHome
@@ -21,7 +22,12 @@ else {
 $script:AnchorDir = Join-Path $script:CodexRemoteHome "services/anchor"
 $script:AnchorBinary = Join-Path $script:AnchorDir "bin/codex-remote-anchor.exe"
 $script:EnvFile = Join-Path $script:CodexRemoteHome ".env"
-$script:CredentialsFile = Join-Path $script:CodexRemoteHome "credentials.json"
+$script:CredentialsFile = if ($env:CODEX_REMOTE_CREDENTIALS_FILE) {
+  $env:CODEX_REMOTE_CREDENTIALS_FILE
+}
+else {
+  Join-Path $script:DefaultHome "credentials.json"
+}
 
 function Write-Pass([string]$Message) {
   Write-Host "  [OK] $Message" -ForegroundColor Green
@@ -48,6 +54,7 @@ function Get-DefaultEnvContent() {
     "DENO_DEPLOY_TOKEN="
     "DENO_WEB_JWT_SECRET="
     "DENO_ANCHOR_JWT_SECRET="
+    "CODEX_REMOTE_ANCHOR_JWT_SECRET="
     "ANCHOR_PORT=8788"
     "ANCHOR_ORBIT_URL="
     "AUTH_URL="
@@ -161,7 +168,7 @@ function Read-EnvFileMap([string]$Path) {
     if (-not $key) {
       continue
     }
-    $value = $trimmed.Substring($idx + 1)
+    $value = [string]$trimmed.Substring($idx + 1)
     if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
       if ($value.Length -ge 2) {
         $value = $value.Substring(1, $value.Length - 2)
@@ -255,6 +262,19 @@ function Assert-PrereqsForRun() {
 
 function Invoke-Anchor([bool]$ForceLogin) {
   Assert-PrereqsForRun
+
+  $credentialsDir = Split-Path -Parent $script:CredentialsFile
+  if ($credentialsDir -and -not (Test-Path $credentialsDir)) {
+    New-Item -ItemType Directory -Path $credentialsDir -Force | Out-Null
+  }
+  $legacyCredentials = Join-Path $script:CodexRemoteHome "credentials.json"
+  if (
+    $legacyCredentials -ne $script:CredentialsFile -and
+    -not (Test-Path $script:CredentialsFile) -and
+    (Test-Path $legacyCredentials)
+  ) {
+    Copy-Item $legacyCredentials $script:CredentialsFile -Force
+  }
 
   $envVars = Read-EnvFileMap $script:EnvFile
   $previous = @{}
@@ -510,6 +530,9 @@ function Cmd-Update() {
         $projectName = Get-EnvValue "DENO_DEPLOY_PROJECT" "codex-remote"
         $denoWebSecret = Get-EnvValue "DENO_WEB_JWT_SECRET"
         $denoAnchorSecret = Get-EnvValue "DENO_ANCHOR_JWT_SECRET"
+        if (-not $denoAnchorSecret) {
+          $denoAnchorSecret = Get-EnvValue "CODEX_REMOTE_ANCHOR_JWT_SECRET"
+        }
         $denoDeployToken = Get-EnvValue "DENO_DEPLOY_TOKEN"
         if (-not $denoDeployToken) {
           $denoDeployToken = [Environment]::GetEnvironmentVariable("DENO_DEPLOY_TOKEN", "Process")
@@ -603,18 +626,19 @@ function Cmd-Update() {
 function Cmd-SelfHost([string[]]$CommandArgs = @()) {
   $loginMode = "ask"
   $provider = "cloudflare"
-  for ($i = 0; $i -lt $CommandArgs.Length; $i++) {
-    $arg = $CommandArgs[$i]
+  $commandArgsList = @($CommandArgs)
+  for ($i = 0; $i -lt $commandArgsList.Count; $i++) {
+    $arg = [string]$commandArgsList[$i]
     switch -Regex ($arg) {
       "^--login$" { $loginMode = "always"; continue }
       "^--no-login$" { $loginMode = "never"; continue }
       "^--provider=(.+)$" { $provider = $Matches[1]; continue }
       "^--provider$" {
-        if ($i -ge ($CommandArgs.Length - 1)) {
+        if ($i -ge ($commandArgsList.Count - 1)) {
           throw "Missing value for --provider (cloudflare|deno)."
         }
         $i++
-        $provider = $CommandArgs[$i]
+        $provider = [string]$commandArgsList[$i]
         continue
       }
       default { throw "Unknown option for self-host: $arg. Usage: codex-remote self-host [--provider cloudflare|deno] [--login|--no-login]" }
@@ -724,8 +748,9 @@ function Cmd-Help() {
 }
 
 try {
-  $command = if ($args.Length -gt 0) { $args[0].ToLowerInvariant() } else { "help" }
-  $commandArgs = if ($args.Length -gt 1) { $args[1..($args.Length - 1)] } else { @() }
+  $scriptArgs = @($args)
+  $command = if ($scriptArgs.Count -gt 0) { [string]$scriptArgs[0].ToLowerInvariant() } else { "help" }
+  $commandArgs = if ($scriptArgs.Count -gt 1) { @($scriptArgs[1..($scriptArgs.Count - 1)]) } else { @() }
 
   switch ($command) {
     "start" { Cmd-Start; break }

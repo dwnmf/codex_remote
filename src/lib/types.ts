@@ -231,6 +231,37 @@ export interface GitWorktreeCreateResult {
   head: string;
 }
 
+export interface GitStatusEntry {
+  path: string;
+  rawStatus: string;
+  staged: boolean;
+  unstaged: boolean;
+  untracked: boolean;
+  renamedFrom?: string;
+}
+
+export interface GitStatusResult {
+  repoRoot: string;
+  branch: string | null;
+  clean: boolean;
+  entries: GitStatusEntry[];
+}
+
+export interface GitCommitResult {
+  committed: boolean;
+  output: string;
+}
+
+export interface GitPushResult {
+  pushed: boolean;
+  output: string;
+}
+
+export interface GitRevertResult {
+  reverted: number;
+  output: string;
+}
+
 export interface AnchorFileReadResult {
   path: string;
   content: string;

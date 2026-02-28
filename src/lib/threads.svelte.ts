@@ -8,6 +8,7 @@ import { navigate } from "../router";
 
 const STORE_KEY = "__codex_remote_threads_store__";
 const SETTINGS_STORAGE_KEY = "codex_remote_thread_settings";
+const PROJECTS_STORAGE_KEY = "codex_remote_thread_projects";
 
 const DEFAULT_SETTINGS: ThreadSettings = {
   model: "",
@@ -17,6 +18,7 @@ const DEFAULT_SETTINGS: ThreadSettings = {
 };
 
 interface PendingStart {
+  cwd: string | null;
   input: string | null;
   model: string | null;
   collaborationMode: CollaborationMode | null;
@@ -31,6 +33,7 @@ class ThreadsStore {
   loading = $state(false);
 
   #settings = $state<Map<string, ThreadSettings>>(new Map());
+  #projectByThread = $state<Map<string, string>>(new Map());
   #nextId = 1;
   #pendingRequests = new Map<number, string>();
   #pendingStarts = new Map<number, PendingStart>();
@@ -38,6 +41,7 @@ class ThreadsStore {
 
   constructor() {
     this.#loadSettings();
+    this.#loadProjectPaths();
   }
 
   getSettings(threadId: string | null): ThreadSettings {
@@ -59,6 +63,20 @@ class ThreadsStore {
     }
     this.#settings = new Map(this.#settings).set(threadId, next);
     this.#saveSettings();
+  }
+
+  getProjectPath(threadId: string | null): string {
+    if (!threadId) return "";
+    return this.#projectByThread.get(threadId) ?? "";
+  }
+
+  setProjectPath(threadId: string, path: string) {
+    const normalized = path.trim();
+    if (!normalized) return;
+    const current = this.#projectByThread.get(threadId);
+    if (current === normalized) return;
+    this.#projectByThread = new Map(this.#projectByThread).set(threadId, normalized);
+    this.#saveProjectPaths();
   }
 
   fetch() {
@@ -152,6 +170,12 @@ class ThreadsStore {
       this.#settings = next;
       this.#saveSettings();
     }
+    if (this.#projectByThread.has(threadId)) {
+      const next = new Map(this.#projectByThread);
+      next.delete(threadId);
+      this.#projectByThread = next;
+      this.#saveProjectPaths();
+    }
   }
 
   handleMessage(msg: RpcMessage) {
@@ -225,6 +249,10 @@ class ThreadsStore {
   #handleStartedThread(thread: ThreadInfo, pending: PendingStart | null) {
     this.#addThread(thread);
 
+    if (pending?.cwd?.trim()) {
+      this.setProjectPath(thread.id, pending.cwd.trim());
+    }
+
     if (pending?.onThreadStarted) {
       pending.onThreadStarted(thread.id);
     }
@@ -290,6 +318,7 @@ class ThreadsStore {
     if (!anchorId && !auth.isLocalMode) {
       const message = this.#getAnchorErrorMessage();
       const pending: PendingStart = {
+        cwd: cwd.trim() || null,
         input: input?.trim() ? input.trim() : null,
         model: this.#resolveStartModel(options?.collaborationMode),
         collaborationMode: options?.collaborationMode ?? null,
@@ -304,6 +333,7 @@ class ThreadsStore {
     const requestedModel = this.#resolveStartModel(options?.collaborationMode);
     const id = this.#nextId++;
     const pending: PendingStart = {
+      cwd: cwd.trim() || null,
       input: input?.trim() ? input.trim() : null,
       model: requestedModel,
       collaborationMode: options?.collaborationMode ?? null,
@@ -394,6 +424,36 @@ class ThreadsStore {
         data[threadId] = settings;
       }
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(data));
+    } catch {
+      // ignore
+    }
+  }
+
+  #loadProjectPaths() {
+    try {
+      const saved = localStorage.getItem(PROJECTS_STORAGE_KEY);
+      if (!saved) return;
+      const data = JSON.parse(saved) as Record<string, string>;
+      const next = new Map<string, string>();
+      for (const [threadId, path] of Object.entries(data)) {
+        const normalizedThreadId = threadId.trim();
+        const normalizedPath = typeof path === "string" ? path.trim() : "";
+        if (!normalizedThreadId || !normalizedPath) continue;
+        next.set(normalizedThreadId, normalizedPath);
+      }
+      this.#projectByThread = next;
+    } catch {
+      // ignore
+    }
+  }
+
+  #saveProjectPaths() {
+    try {
+      const data: Record<string, string> = {};
+      for (const [threadId, path] of this.#projectByThread) {
+        data[threadId] = path;
+      }
+      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(data));
     } catch {
       // ignore
     }

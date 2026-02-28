@@ -1,6 +1,6 @@
 import { hostname, homedir } from "node:os";
-import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import type { WsClient } from "./types";
 import {
@@ -19,7 +19,10 @@ const ANCHOR_WS_TOKEN = (process.env.ANCHOR_WS_TOKEN ?? "").trim();
 const ANCHOR_WS_ALLOW_PUBLIC = process.env.ANCHOR_WS_ALLOW_PUBLIC === "1";
 const startedAt = Date.now();
 
-let CODEX_REMOTE_ANCHOR_JWT_SECRET = "";
+let CODEX_REMOTE_ANCHOR_JWT_SECRET =
+  process.env.CODEX_REMOTE_ANCHOR_JWT_SECRET
+  ?? process.env.DENO_ANCHOR_JWT_SECRET
+  ?? "";
 let USER_ID: string | undefined;
 let ANCHOR_ACCESS_TOKEN = "";
 let ANCHOR_REFRESH_TOKEN = "";
@@ -387,6 +390,15 @@ interface GitWorktree {
   prunable: boolean;
 }
 
+interface GitStatusEntry {
+  path: string;
+  rawStatus: string;
+  staged: boolean;
+  unstaged: boolean;
+  untracked: boolean;
+  renamedFrom?: string;
+}
+
 function normalizeAbsolutePath(path: string): string {
   return resolve(path.trim());
 }
@@ -408,6 +420,38 @@ function getParamString(params: JsonObject | null, key: string): string {
     throw new Error(`${key} is required`);
   }
   return value.trim();
+}
+
+function getParamStringArray(params: JsonObject | null, key: string): string[] {
+  const value = params?.[key];
+  if (value == null) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`${key} must be an array of strings`);
+  }
+  const seen = new Set<string>();
+  const parsed: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    parsed.push(trimmed);
+  }
+  return parsed;
+}
+
+function resolveRepoRelativePath(repoRoot: string, rawPath: string): { absolute: string; relativePath: string } {
+  const absolute = isAbsolute(rawPath)
+    ? normalizeAbsolutePath(rawPath)
+    : normalizeAbsolutePath(resolve(repoRoot, rawPath));
+  const rel = relative(repoRoot, absolute);
+  if (!rel || rel === "." || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`path is outside repo root: ${rawPath}`);
+  }
+  return {
+    absolute,
+    relativePath: rel.replace(/\\/g, "/"),
+  };
 }
 
 async function readProcessStream(stream: ReadableStream<Uint8Array> | number | null | undefined): Promise<string> {
@@ -720,6 +764,9 @@ async function maybeHandleAnchorLocalRpc(message: JsonObject): Promise<JsonObjec
   if (message.method === "anchor.git.inspect") {
     return handleGitInspect(id, params);
   }
+  if (message.method === "anchor.git.status") {
+    return handleGitStatus(id, params);
+  }
   if (message.method === "anchor.git.worktree.list") {
     return handleGitWorktreeList(id, params);
   }
@@ -731,6 +778,15 @@ async function maybeHandleAnchorLocalRpc(message: JsonObject): Promise<JsonObjec
   }
   if (message.method === "anchor.git.worktree.prune") {
     return handleGitWorktreePrune(id, params);
+  }
+  if (message.method === "anchor.git.commit") {
+    return handleGitCommit(id, params);
+  }
+  if (message.method === "anchor.git.push") {
+    return handleGitPush(id, params);
+  }
+  if (message.method === "anchor.git.revert") {
+    return handleGitRevert(id, params);
   }
   if (message.method === "anchor.release.inspect") {
     return handleAnchorReleaseInspect(id, params);
@@ -1020,6 +1076,255 @@ async function refreshAnchorAccessToken(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+function parseGitStatusPorcelain(porcelain: string): GitStatusEntry[] {
+  const entries: GitStatusEntry[] = [];
+  const lines = porcelain.split("\n").map((line) => line.trimEnd()).filter(Boolean);
+
+  for (const line of lines) {
+    if (line.length < 3) continue;
+    const indexStatus = line[0] ?? " ";
+    const worktreeStatus = line[1] ?? " ";
+    const rawStatus = `${indexStatus}${worktreeStatus}`;
+    const rest = line.slice(3).trim();
+    if (!rest) continue;
+
+    let path = rest;
+    let renamedFrom: string | undefined;
+    if (rest.includes(" -> ")) {
+      const [from, to] = rest.split(" -> ");
+      if (to) {
+        path = to.trim();
+        renamedFrom = from?.trim() || undefined;
+      }
+    }
+
+    entries.push({
+      path,
+      rawStatus,
+      staged: indexStatus !== " " && indexStatus !== "?",
+      unstaged: worktreeStatus !== " " && worktreeStatus !== "?",
+      untracked: indexStatus === "?" && worktreeStatus === "?",
+      ...(renamedFrom ? { renamedFrom } : {}),
+    });
+  }
+
+  return entries;
+}
+
+async function handleGitStatus(id: number | string, params: JsonObject | null): Promise<JsonObject> {
+  try {
+    const path = ensureAbsolutePath(getParamString(params, "path"), "path");
+    const repoRoot = await resolveRepoRoot(path);
+    if (!repoRoot) {
+      return { id, error: { code: -1, message: "path is not inside a git repository" } };
+    }
+
+    const statusResult = await runGitCommand(["-C", repoRoot, "status", "--porcelain=1"]);
+    if (!statusResult.ok) {
+      return {
+        id,
+        error: { code: statusResult.code || -1, message: statusResult.stderr || "Failed to read git status" },
+      };
+    }
+
+    const entries = parseGitStatusPorcelain(statusResult.stdout);
+    const branch = await readCurrentBranch(repoRoot);
+    return {
+      id,
+      result: {
+        repoRoot,
+        branch,
+        clean: entries.length === 0,
+        entries,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to read git status";
+    return { id, error: { code: -1, message } };
+  }
+}
+
+async function handleGitCommit(id: number | string, params: JsonObject | null): Promise<JsonObject> {
+  try {
+    const repoRoot = ensureAbsolutePath(getParamString(params, "repoRoot"), "repoRoot");
+    const resolvedRepoRoot = await resolveRepoRoot(repoRoot);
+    if (!resolvedRepoRoot) {
+      return { id, error: { code: -1, message: "repoRoot is not a git repository" } };
+    }
+    const message = getParamString(params, "message");
+    const stageAll = params?.stageAll !== false;
+    const requestedPaths = getParamStringArray(params, "paths");
+    const selectedPaths = requestedPaths.map((path) => resolveRepoRelativePath(resolvedRepoRoot, path).relativePath);
+
+    if (stageAll) {
+      const addResult = await runGitCommand(["-C", resolvedRepoRoot, "add", "-A"]);
+      if (!addResult.ok) {
+        return {
+          id,
+          error: { code: addResult.code || -1, message: addResult.stderr || "Failed to stage changes" },
+        };
+      }
+    } else if (selectedPaths.length > 0) {
+      const addResult = await runGitCommand(["-C", resolvedRepoRoot, "add", "-A", "--", ...selectedPaths]);
+      if (!addResult.ok) {
+        return {
+          id,
+          error: { code: addResult.code || -1, message: addResult.stderr || "Failed to stage selected files" },
+        };
+      }
+    }
+
+    const commitArgs = ["-C", resolvedRepoRoot, "commit", "-m", message];
+    if (!stageAll && selectedPaths.length > 0) {
+      commitArgs.push("--", ...selectedPaths);
+    }
+    const commitResult = await runGitCommand(commitArgs);
+    if (!commitResult.ok) {
+      const output = [commitResult.stderr, commitResult.stdout].filter(Boolean).join("\n").trim();
+      return { id, error: { code: commitResult.code || -1, message: output || "Failed to create commit" } };
+    }
+
+    const output = [commitResult.stdout, commitResult.stderr].filter(Boolean).join("\n").trim();
+    return {
+      id,
+      result: {
+        committed: true,
+        output,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to commit changes";
+    return { id, error: { code: -1, message } };
+  }
+}
+
+async function handleGitRevert(id: number | string, params: JsonObject | null): Promise<JsonObject> {
+  try {
+    const repoRoot = ensureAbsolutePath(getParamString(params, "repoRoot"), "repoRoot");
+    const resolvedRepoRoot = await resolveRepoRoot(repoRoot);
+    if (!resolvedRepoRoot) {
+      return { id, error: { code: -1, message: "repoRoot is not a git repository" } };
+    }
+
+    const requestedPaths = getParamStringArray(params, "paths");
+    if (requestedPaths.length === 0) {
+      const before = await runGitCommand(["-C", resolvedRepoRoot, "status", "--porcelain=1"]);
+      const beforeCount = before.ok && before.stdout
+        ? parseGitStatusPorcelain(before.stdout).length
+        : 0;
+
+      const resetResult = await runGitCommand(["-C", resolvedRepoRoot, "reset", "--hard", "HEAD"]);
+      if (!resetResult.ok) {
+        const output = [resetResult.stderr, resetResult.stdout].filter(Boolean).join("\n").trim();
+        return { id, error: { code: resetResult.code || -1, message: output || "Failed to revert changes" } };
+      }
+      const cleanResult = await runGitCommand(["-C", resolvedRepoRoot, "clean", "-fd"]);
+      if (!cleanResult.ok) {
+        const output = [cleanResult.stderr, cleanResult.stdout].filter(Boolean).join("\n").trim();
+        return { id, error: { code: cleanResult.code || -1, message: output || "Failed to clean untracked files" } };
+      }
+      const output = [resetResult.stdout, cleanResult.stdout, cleanResult.stderr]
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+      return {
+        id,
+        result: {
+          reverted: beforeCount,
+          output: output || "All changes reverted.",
+        },
+      };
+    }
+
+    const selected = requestedPaths.map((path) => resolveRepoRelativePath(resolvedRepoRoot, path));
+    let reverted = 0;
+    const outputParts: string[] = [];
+
+    for (const item of selected) {
+      const trackedCheck = await runGitCommand([
+        "-C",
+        resolvedRepoRoot,
+        "ls-files",
+        "--error-unmatch",
+        "--",
+        item.relativePath,
+      ]);
+
+      if (trackedCheck.ok) {
+        const restoreResult = await runGitCommand([
+          "-C",
+          resolvedRepoRoot,
+          "restore",
+          "--source=HEAD",
+          "--staged",
+          "--worktree",
+          "--",
+          item.relativePath,
+        ]);
+        if (!restoreResult.ok) {
+          const output = [restoreResult.stderr, restoreResult.stdout].filter(Boolean).join("\n").trim();
+          return {
+            id,
+            error: { code: restoreResult.code || -1, message: output || `Failed to revert ${item.relativePath}` },
+          };
+        }
+        reverted += 1;
+        if (restoreResult.stdout) outputParts.push(restoreResult.stdout);
+        continue;
+      }
+
+      await rm(item.absolute, { recursive: true, force: true, maxRetries: 2 });
+      reverted += 1;
+      outputParts.push(`removed ${item.relativePath}`);
+    }
+
+    return {
+      id,
+      result: {
+        reverted,
+        output: outputParts.join("\n").trim() || `Reverted ${reverted} file(s).`,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to revert changes";
+    return { id, error: { code: -1, message } };
+  }
+}
+
+async function handleGitPush(id: number | string, params: JsonObject | null): Promise<JsonObject> {
+  try {
+    const repoRoot = ensureAbsolutePath(getParamString(params, "repoRoot"), "repoRoot");
+    const resolvedRepoRoot = await resolveRepoRoot(repoRoot);
+    if (!resolvedRepoRoot) {
+      return { id, error: { code: -1, message: "repoRoot is not a git repository" } };
+    }
+
+    const remote = typeof params?.remote === "string" ? params.remote.trim() : "";
+    const branch = typeof params?.branch === "string" ? params.branch.trim() : "";
+    const args = ["-C", resolvedRepoRoot, "push"];
+    if (remote) args.push(remote);
+    if (branch) args.push(branch);
+
+    const pushResult = await runGitCommand(args);
+    if (!pushResult.ok) {
+      const output = [pushResult.stderr, pushResult.stdout].filter(Boolean).join("\n").trim();
+      return { id, error: { code: pushResult.code || -1, message: output || "Failed to push changes" } };
+    }
+
+    const output = [pushResult.stdout, pushResult.stderr].filter(Boolean).join("\n").trim();
+    return {
+      id,
+      result: {
+        pushed: true,
+        output,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to push changes";
+    return { id, error: { code: -1, message } };
   }
 }
 
@@ -1647,7 +1952,7 @@ ensureAppServer();
 async function startup() {
   const saved = await loadCredentials();
   if (saved) {
-    CODEX_REMOTE_ANCHOR_JWT_SECRET = saved.anchorJwtSecret ?? "";
+    CODEX_REMOTE_ANCHOR_JWT_SECRET = saved.anchorJwtSecret ?? CODEX_REMOTE_ANCHOR_JWT_SECRET;
     ANCHOR_ACCESS_TOKEN = saved.anchorAccessToken ?? "";
     ANCHOR_REFRESH_TOKEN = saved.anchorRefreshToken ?? "";
     ANCHOR_ACCESS_EXPIRES_AT_MS = saved.anchorAccessExpiresAtMs ?? 0;
