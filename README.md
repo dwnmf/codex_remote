@@ -4,7 +4,8 @@ Codex Remote позволяет запускать и контролироват
 
 Интерфейс показывает поток ответов в реальном времени, подтверждения действий и изменения файлов до применения.
 
-<img src="docs/assets/demo.gif" alt="Демо Codex Remote" width="320" />
+<img width="960" height="422" alt="{FD0D323D-0EAA-4F2C-B725-173BF2B777BA}" src="https://github.com/user-attachments/assets/9de4ac85-be0c-432b-bcb0-499d8bd30490" />
+
 
 ## Что Внутри
 
@@ -22,6 +23,8 @@ Anchor (локально)
   ▼
 codex app-server
 ```
+<img width="960" height="429" alt="{EA5336C6-C3D8-434F-8F67-FF20ADA6C4AF}" src="https://github.com/user-attachments/assets/e7b382b6-9eb7-4dc9-a908-bd4d9f09d7be" />
+
 
 ## Что Нового
 
