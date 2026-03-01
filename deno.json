@@ -1,6 +1,6 @@
 {
   "deploy": {
-    "project": "f2f3d51b-ff99-4917-9285-43a66f6a81d4",
+    "project": "REPLACE_WITH_DENO_PROJECT_ID",
     "exclude": [
       "**/node_modules"
     ],

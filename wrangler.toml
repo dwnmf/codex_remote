@@ -4,5 +4,5 @@ pages_build_output_dir = "dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "codex-remote"
-database_id = "7842cb67-ccd1-4fb2-b41d-636fa13976ad"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
 migrations_dir = "migrations"
