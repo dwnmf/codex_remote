@@ -1,26 +1,28 @@
-# Installing Codex Remote
+# Установка Codex Remote
 
-Codex Remote runs a local Anchor service on your machine that connects to Orbit (the hosted control plane) so you can supervise Codex sessions remotely.
+Codex Remote запускает локальный сервис Anchor на вашей машине и подключает его к Orbit (control plane), чтобы вы могли управлять сессиями Codex удалённо через браузер.
 
-## Requirements
+## Требования
 
-- macOS or Linux for the `install.sh` flow
-- Windows for the `install.ps1` flow
-- Internet access for dependency bootstrap
+- macOS или Linux для установки через `install.sh`
+- Windows для установки через `install.ps1`
+- интернет-доступ для загрузки зависимостей
 
-`install.ps1` supports two modes:
-- `source` mode: clone repo + Bun runtime (requires `git` + `bun`)
-- `release` mode: download prebuilt Windows release package (does not require `git` or `bun` on the client)
+Для Windows-установщика `install.ps1` доступны режимы:
 
-Default mode is `auto`:
-- if both `git` and `bun` are already present, installer uses `source`
-- otherwise installer uses `release`
+- `source`: клонирование репозитория + запуск через Bun (нужны `git` и `bun`)
+- `release`: загрузка готового пакета из GitHub Releases (на клиенте не нужны `git` и `bun`)
 
-The installer always ensures [Codex CLI](https://github.com/openai/codex) is available and runs `codex login`.
+Режим по умолчанию: `auto`.
 
-For a lighter backend alternative, see: [FastAPI Control Plane](fastapi-control-plane.md).
+- если установлены и `git`, и `bun` -> используется `source`
+- иначе -> используется `release`
 
-## Install
+Установщик проверяет доступность [Codex CLI](https://github.com/openai/codex) и запускает `codex login`.
+
+Если нужен облегчённый backend вместо Cloudflare Orbit, см. [FastAPI Control Plane](fastapi-control-plane.md).
+
+## Установка
 
 macOS / Linux:
 
@@ -34,106 +36,105 @@ Windows (PowerShell):
 iwr -useb https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.ps1 | iex
 ```
 
-To force a specific mode:
+Принудительно выбрать режим установки на Windows:
 
 ```powershell
-$env:CODEX_REMOTE_INSTALL_MODE="release"   # or "source"
+$env:CODEX_REMOTE_INSTALL_MODE="release"   # или "source"
 iwr -useb https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.ps1 | iex
 ```
 
-In release mode, installer downloads `codex-remote-windows-x64.zip` from GitHub Releases to `~/.codex-remote`, installs CLI wrappers, and uses the bundled `anchor.exe`.
+В `release`-режиме установщик скачивает `codex-remote-windows-x64.zip` в `~/.codex-remote`, ставит CLI-обёртки и использует включённый `anchor.exe`.
 
-To run self-host setup during install:
+Запустить self-host мастер прямо в процессе установки:
 
 ```bash
 CODEX_REMOTE_RUN_SELF_HOST=1 curl -fsSL https://raw.githubusercontent.com/dwnmf/codex_remote/main/install.sh | bash
 ```
 
-### Build from source
+## Сборка из исходников
 
 ```bash
 git clone https://github.com/dwnmf/codex_remote.git ~/.codex-remote
 cd ~/.codex-remote/services/anchor && bun install
 ```
 
-Add `~/.codex-remote/bin` to your PATH.
+Добавьте `~/.codex-remote/bin` в `PATH`.
 
-## Setup
+## Первичная настройка
 
-1. If you skipped deployment during install, run `codex-remote self-host --provider cloudflare --login` (or `--provider deno`)
-2. Run `codex-remote start` (or `codex-remote login` to re-authenticate)
-3. A device code is displayed in your terminal
-4. A browser window opens to enter the code
-5. Once authorised, credentials are saved to `~/.codex-remote/credentials.json`
+1. Если self-host не запускали во время установки: `codex-remote self-host --provider cloudflare --login` (или `--provider deno --login`)
+2. Запустите `codex-remote start` (или `codex-remote login` для переавторизации)
+3. В терминале появится device code
+4. Откроется браузер для подтверждения входа
+5. Данные сохранятся в `~/.codex-remote/credentials.json`
 
-## Running
+## Запуск
 
-Start Anchor:
 ```bash
 codex-remote start
 ```
 
-Anchor connects to Orbit and waits for commands from the web client. Open the Codex Remote web app in your browser to start supervising sessions.
+После запуска Anchor подключается к Orbit и ждёт команд из веб-клиента.
 
-## CLI Commands
+## Команды CLI
 
-| Command | Description |
-|---------|-------------|
-| `codex-remote start` | Start the anchor service |
-| `codex-remote login` | Re-authenticate with the web app |
-| `codex-remote doctor` | Check prerequisites and configuration |
-| `codex-remote config` | Open `.env` in your editor |
-| `codex-remote update` | Pull latest code and reinstall dependencies |
-| `codex-remote self-host [--provider cloudflare\|deno] [--login\|--no-login]` | Run the self-host setup wizard, choose provider, and control post-setup login |
-| `codex-remote uninstall` | Remove Codex Remote from your system |
-| `codex-remote version` | Print version |
-| `codex-remote help` | Show help |
+| Команда | Назначение |
+|---|---|
+| `codex-remote start` | Запуск Anchor |
+| `codex-remote login` | Переавторизация устройства |
+| `codex-remote doctor` | Проверка окружения и конфигурации |
+| `codex-remote config` | Открыть `.env` в редакторе |
+| `codex-remote update` | Обновить код, зависимости и выполнить redeploy self-host (если настроен) |
+| `codex-remote self-host --provider cloudflare\|deno --login\|--no-login` | Мастер self-host и управление post-setup логином |
+| `codex-remote uninstall` | Удалить Codex Remote |
+| `codex-remote version` | Показать версию |
+| `codex-remote help` | Показать справку |
 
-## Verify
+## Проверка установки
 
-Check that everything is configured correctly:
 ```bash
 codex-remote doctor
 ```
 
-This checks for Bun, Codex CLI, Anchor source, dependencies, `.env` configuration, credentials, and whether Anchor is running.
+Проверяются Bun, Codex CLI, исходники Anchor, зависимости, `.env`, креды и статус Anchor.
 
-## Updating
+## Обновление
 
 ```bash
 codex-remote update
 ```
 
-This resets local repo changes, pulls the latest code, reinstalls Anchor dependencies, and redeploys self-host services (Cloudflare or Deno) when self-host settings are present.
+Команда подтягивает актуальный код, переустанавливает зависимости и, если настроен self-host, повторно деплоит backend/frontend для выбранного провайдера.
 
-## Self-hosting
-
-To deploy the entire stack to your own provider:
+## Self-host
 
 ```bash
 codex-remote self-host --provider cloudflare
-# or:
+# или:
 codex-remote self-host --provider deno
 ```
 
-See the [self-hosting guide](self-hosting.md) for prerequisites and a full walkthrough.
+Полный сценарий развёртывания описан в [self-hosting.md](self-hosting.md).
 
-## Troubleshooting
+## Типовые проблемы
 
-### "codex-remote: command not found"
-Make sure `~/.codex-remote/bin` is in your PATH:
+### `codex-remote: command not found`
+
+Убедитесь, что `~/.codex-remote/bin` есть в `PATH`:
+
 ```bash
 echo 'export PATH="$HOME/.codex-remote/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-### Connection issues
-Re-authenticate:
+### Ошибки подключения
+
 ```bash
 codex-remote login
 ```
 
-### Check configuration
+### Диагностика
+
 ```bash
 codex-remote doctor
 ```

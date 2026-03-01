@@ -1,15 +1,15 @@
-# Documentation
+# Документация
 
-| Guide | Description |
-|-------|-------------|
-| [Installation](installation.md) | Install Codex Remote and get started |
-| [Self-Hosting](self-hosting.md) | Deploy to your own Cloudflare or Deno account |
-| [Architecture](architecture.md) | System design, components, and data flows |
-| [Auth](auth.md) | Passkey authentication and JWT details |
-| [Events](events.md) | JSON-RPC protocol reference |
-| [Security](security.md) | Threat model and security controls |
-| [FastAPI Control Plane](fastapi-control-plane.md) | Lightweight self-host stack without Cloudflare Workers |
-| [Repo Structure](repo-structure.md) | Project directory layout |
-| [Vision](vision.md) | Product vision and design principles |
+| Раздел | Описание |
+|---|---|
+| [Установка](installation.md) | Установка Codex Remote и первый запуск |
+| [Self-hosting](self-hosting.md) | Развёртывание в своём Cloudflare или Deno аккаунте |
+| [Архитектура](architecture.md) | Компоненты системы, потоки данных и взаимодействие |
+| [Аутентификация](auth.md) | Passkey/TOTP/device-code и JWT/token-модель |
+| [События](events.md) | Справочник JSON-RPC и служебных Orbit-сообщений |
+| [Безопасность](security.md) | Модель угроз, текущие меры и ограничения |
+| [FastAPI Control Plane](fastapi-control-plane.md) | Облегчённый self-host стек без Cloudflare Workers |
+| [Структура репозитория](repo-structure.md) | Карта директорий и назначение ключевых частей |
+| [Vision](vision.md) | Продуктовое видение и принципы развития |
 
-For a quick overview, see the [main README](../README.md).
+Для быстрого обзора проекта начните с [главного README](../README.md).

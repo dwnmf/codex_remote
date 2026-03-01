@@ -1,48 +1,43 @@
-# Event Reference
+# Справочник событий
 
-This document covers every JSON-RPC method the web client sends and receives
-via Anchor/Orbit. The wire format is JSON-RPC 2.0-like over WebSocket.
+Документ описывает JSON-RPC методы и служебные Orbit-сообщения, которыми обмениваются web client, Orbit и Anchor.
 
-## Client → Server
+Формат на проводе: JSON-RPC 2.0-подобные сообщения поверх WebSocket.
 
-### Thread Management
+## Клиент -> сервер
 
-| Method | Params | Notes |
+### Управление тредами
+
+| Метод | Параметры | Примечание |
 |---|---|---|
-| `thread/start` | `{ cwd, approvalPolicy?, sandbox? }` | Creates a new thread |
-| `thread/list` | `{ cursor, limit }` | Paginated list |
-| `thread/resume` | `{ threadId }` | Rehydrate a thread (returns turns + items) |
-| `thread/archive` | `{ threadId }` | Soft-delete |
+| `thread/start` | `{ cwd, approvalPolicy?, sandbox? }` | Создать новый тред |
+| `thread/list` | `{ cursor, limit }` | Постраничный список |
+| `thread/resume` | `{ threadId }` | Восстановить тред вместе с историей |
+| `thread/archive` | `{ threadId }` | Мягкое архивирование |
 
-### Anchor Local Git Helpers
+### Управление ходом (`turn`)
 
-These methods are handled by Anchor directly and do not go through `codex app-server`.
-
-| Method | Params | Notes |
+| Метод | Параметры | Примечание |
 |---|---|---|
-| `anchor.git.inspect` | `{ path }` | Returns `{ isGitRepo, repoRoot?, currentBranch? }` for a path. |
-| `anchor.git.worktree.list` | `{ repoRoot }` | Returns `{ repoRoot, mainPath, worktrees[] }`. |
-| `anchor.git.worktree.create` | `{ repoRoot, baseRef?, branchName?, path? }` | Creates a worktree, optionally auto-generating branch/path. |
-| `anchor.git.worktree.remove` | `{ repoRoot, path, force? }` | Removes a worktree (`force` uses `--force`). |
-| `anchor.git.worktree.prune` | `{ repoRoot }` | Runs `git worktree prune`; returns `{ prunedCount }`. |
-| `anchor.config.read` | `{ path?, anchorId? }` | Reads Codex `config.toml`, returning `{ path, exists, content, candidates[], platform }`. |
-| `anchor.config.write` | `{ content, path?, anchorId? }` | Writes Codex `config.toml`, returning `{ saved, path, bytes }`. |
-| `anchor.image.read` | `{ path, anchorId? }` | Reads an image file and returns `{ path, mimeType, dataBase64, bytes }`. |
+| `turn/start` | `{ threadId, input, collaborationMode?, model?, effort?, sandboxPolicy? }` | Запустить ход. `input` поддерживает текст и изображения |
+| `turn/interrupt` | `{ threadId, turnId }` | Прервать текущий ход |
 
-### Turn Control
+`input` пример:
 
-| Method | Params | Notes |
+```json
+[
+  { "type": "text", "text": "..." },
+  { "type": "input_image", "image_url": "https://...", "detail": "high" }
+]
+```
+
+### Collaboration mode
+
+| Метод | Параметры | Примечание |
 |---|---|---|
-| `turn/start` | `{ threadId, input, collaborationMode?, model?, effort?, sandboxPolicy? }` | Start a turn. `input` supports text + images: `[{ type: "text", text }, { type: "input_image", image_url, detail? }]`. `collaborationMode` sets plan/code mode. |
-| `turn/interrupt` | `{ threadId, turnId }` | Interrupt an in-progress turn. Returns `{}`, then `turn/completed` with status `"Interrupted"`. |
+| `collaborationMode/list` | `{}` | Вернуть доступные режимы |
 
-### Collaboration Mode
-
-| Method | Params | Notes |
-|---|---|---|
-| `collaborationMode/list` | `{}` | Fetch available presets. Returns `{ data: CollaborationModeMask[] }`. |
-
-`collaborationMode` on `turn/start`:
+Пример передачи `collaborationMode` в `turn/start`:
 
 ```json
 {
@@ -57,120 +52,146 @@ These methods are handled by Anchor directly and do not go through `codex app-se
 }
 ```
 
-`mode` values: `"plan"`, `"code"`.
+Поддерживаемые режимы: `"plan"`, `"code"`.
 
-### Approval Responses
+### Ответы на запросы подтверждения
 
-Sent as JSON-RPC responses (matching the request `id`):
-
-```json
-{ "id": <rpcId>, "result": { "decision": "<value>" } }
-```
-
-Decisions: `"accept"`, `"acceptForSession"`, `"decline"`, `"cancel"`.
-
-### User Input Responses
-
-Sent as JSON-RPC responses to `item/tool/requestUserInput`:
+JSON-RPC response на конкретный `id`:
 
 ```json
-{ "id": <rpcId>, "result": { "answers": { "<questionId>": { "answers": ["..."] } } } }
+{ "id": 123, "result": { "decision": "accept" } }
 ```
 
-### Orbit Control Messages
+Варианты `decision`: `accept`, `acceptForSession`, `decline`, `cancel`.
 
-These are not JSON-RPC — they are raw control frames handled by the Orbit DO.
+### Ответы на запросы пользовательского ввода
 
-| Type | Shape | Notes |
+```json
+{ "id": 123, "result": { "answers": { "questionId": { "answers": ["..."] } } } }
+```
+
+## Anchor local helper-методы (`anchor.*`)
+
+Эти методы обрабатываются Anchor локально и не проксируются в `codex app-server`.
+
+| Метод | Параметры | Результат |
 |---|---|---|
-| `orbit.subscribe` | `{ type, threadId }` | Subscribe to events for a thread |
-| `orbit.unsubscribe` | `{ type, threadId }` | Unsubscribe from a thread |
+| `anchor.listDirs` | `{ path?, startPath? }` | `{ dirs, parent, current, roots }` |
+| `anchor.git.inspect` | `{ path }` | `{ isGitRepo, repoRoot?, currentBranch? }` |
+| `anchor.git.status` | `{ path }` | `{ repoRoot, branch, clean, entries[] }` |
+| `anchor.git.worktree.list` | `{ repoRoot }` | `{ repoRoot, mainPath, worktrees[] }` |
+| `anchor.git.worktree.create` | `{ repoRoot, baseRef?, branchName?, path?, rootDir? }` | `{ repoRoot, path, branch, head }` |
+| `anchor.git.worktree.remove` | `{ repoRoot, path, force? }` | `{ removed }` |
+| `anchor.git.worktree.prune` | `{ repoRoot }` | `{ prunedCount }` |
+| `anchor.git.commit` | `{ repoRoot, message, stageAll?, paths? }` | `{ committed, output }` |
+| `anchor.git.push` | `{ repoRoot, remote?, branch? }` | `{ pushed, output }` |
+| `anchor.git.revert` | `{ repoRoot, paths? }` | `{ reverted, output }` |
+| `anchor.release.inspect` | `{ ... }` | release-статус по локальному релиз-процессу |
+| `anchor.release.start` | `{ ... }` | запуск локального релиз-процесса |
+| `anchor.release.status` | `{ ... }` | прогресс релиза |
+| `anchor.config.read` | `{ path?, anchorId? }` | `{ path, exists, content, candidates, platform }` |
+| `anchor.config.write` | `{ content, path?, anchorId? }` | `{ saved, path, bytes }` |
+| `anchor.image.read` | `{ path, anchorId? }` | `{ path, mimeType, dataBase64, bytes }` |
+| `anchor.file.read` | `{ path, anchorId? }` | `{ path, content, bytes, truncated }` |
 
-## Server → Client
+## Orbit control-сообщения (не JSON-RPC)
 
-### Thread Lifecycle
-
-| Method | Params | Notes |
+| Тип | Формат | Назначение |
 |---|---|---|
-| `thread/started` | `{ thread: ThreadInfo }` | Notification after `thread/start` succeeds |
-| `thread/list` response | `{ data: ThreadInfo[] }` | RPC response |
-| `thread/resume` response | `{ thread: { id, turns: [{ items }] } }` | Full thread history for rehydration |
+| `orbit.subscribe` | `{ type, threadId }` | Подписка на события треда |
+| `orbit.unsubscribe` | `{ type, threadId }` | Отписка от треда |
+| `orbit.list-anchors` | `{ type }` | Запрос списка подключённых Anchor |
+| `orbit.anchors` | `{ type, anchors }` | Ответ со списком устройств |
+| `orbit.anchor-connected` | `{ type, anchor }` | Уведомление о новом Anchor |
+| `orbit.anchor-disconnected` | `{ type, anchorId }` | Уведомление об отключении Anchor |
+| `orbit.hello` | `{ type, ... }` | Приветственное сообщение при подключении |
+| `ping` / `pong` | `{ type }` | Keepalive |
 
-### Turn Lifecycle
+## Сервер -> клиент
 
-| Method | Params | Notes |
+### Жизненный цикл треда
+
+| Метод | Параметры | Примечание |
 |---|---|---|
-| `turn/started` | `{ turn: { id, status } }` | Resets plan, reasoning, and status state |
-| `turn/completed` | `{ turn: { id, status } }` | Status: `"Completed"`, `"Interrupted"`, `"Failed"` |
-| `turn/plan/updated` | `{ turnId, explanation?, plan[] }` | Plan step progress. `plan[].status`: `"Pending"`, `"InProgress"`, `"Completed"` |
-| `turn/diff/updated` | `{ threadId, turnId, diff }` | Cumulative workspace diff |
+| `thread/started` | `{ thread: ThreadInfo }` | Нотификация после `thread/start` |
+| `thread/list` (response) | `{ data: ThreadInfo[] }` | Ответ RPC |
+| `thread/resume` (response) | `{ thread: { id, turns: [{ items }] } }` | Полная история треда |
 
-### Item Streaming (Notifications)
+### Жизненный цикл хода
 
-| Method | Params | Notes |
+| Метод | Параметры | Примечание |
 |---|---|---|
-| `item/started` | `{ item }` | Item lifecycle start. Handled for `userMessage` and `commandExecution`. |
-| `item/agentMessage/delta` | `{ threadId, itemId, delta }` | Streaming agent reply text |
-| `item/reasoning/summaryTextDelta` | `{ threadId, delta }` | Reasoning summary chunk |
-| `item/reasoning/textDelta` | `{ threadId, delta }` | Reasoning raw content (preferred over summary) |
-| `item/reasoning/summaryPartAdded` | `{ threadId }` | Section break between reasoning parts |
-| `item/commandExecution/outputDelta` | `{ threadId, itemId, delta }` | Streaming command stdout/stderr |
-| `item/fileChange/outputDelta` | `{ threadId, itemId, delta }` | Streaming file diff output |
-| `item/commandExecution/terminalInteraction` | `{ threadId, itemId, processId?, stdin }` | Interactive command. Empty `stdin` = waiting state. |
-| `item/mcpToolCall/progress` | `{ threadId, itemId, message }` | MCP tool progress messages |
-| `item/plan/delta` | `{ threadId, itemId, delta }` | Streaming plan text (plan mode) |
-| `item/completed` | `{ item }` | Final item state (see Item Types below) |
+| `turn/started` | `{ turn: { id, status } }` | Инициализация UI состояния |
+| `turn/completed` | `{ turn: { id, status } }` | Статус: `Completed`, `Interrupted`, `Failed` |
+| `turn/plan/updated` | `{ turnId, explanation?, plan[] }` | Прогресс плана (`Pending/InProgress/Completed`) |
+| `turn/diff/updated` | `{ threadId, turnId, diff }` | Накопительный diff workspace |
 
-### Approval Requests (JSON-RPC Requests)
+### Потоковые item-уведомления
 
-These are JSON-RPC **requests** from server to client. The client must respond
-with a decision.
+| Метод | Параметры | Примечание |
+|---|---|---|
+| `item/started` | `{ item }` | Старт item |
+| `item/agentMessage/delta` | `{ threadId, itemId, delta }` | Поток текста ответа ассистента |
+| `item/reasoning/summaryTextDelta` | `{ threadId, delta }` | Поток краткого reasoning |
+| `item/reasoning/textDelta` | `{ threadId, delta }` | Поток полного reasoning |
+| `item/reasoning/summaryPartAdded` | `{ threadId }` | Разделение reasoning-блоков |
+| `item/commandExecution/outputDelta` | `{ threadId, itemId, delta }` | stdout/stderr команды |
+| `item/fileChange/outputDelta` | `{ threadId, itemId, delta }` | Поток file diff |
+| `item/commandExecution/terminalInteraction` | `{ threadId, itemId, processId?, stdin }` | Интерактивный ввод в процесс |
+| `item/mcpToolCall/progress` | `{ threadId, itemId, message }` | Прогресс MCP-вызова |
+| `item/plan/delta` | `{ threadId, itemId, delta }` | Поток текста плана |
+| `item/completed` | `{ item }` | Финальное состояние item |
 
-| Method | Params |
+### Запросы подтверждения от сервера
+
+| Метод | Параметры |
 |---|---|
 | `item/commandExecution/requestApproval` | `{ threadId, itemId, reason? }` |
 | `item/fileChange/requestApproval` | `{ threadId, itemId, reason? }` |
 | `item/mcpToolCall/requestApproval` | `{ threadId, itemId, reason? }` |
 
-### User Input Requests (JSON-RPC Requests)
+### Запросы пользовательского ввода от сервера
 
-| Method | Params |
+| Метод | Параметры |
 |---|---|
 | `item/tool/requestUserInput` | `{ threadId, itemId, questions[] }` |
 
-Each question: `{ id, header, question, isOther?, isSecret?, options?: [{ label, description }] }`.
+Формат вопроса:
 
-## Item Types on `item/completed`
+```json
+{
+  "id": "...",
+  "header": "...",
+  "question": "...",
+  "isOther": false,
+  "isSecret": false,
+  "options": [{ "label": "...", "description": "..." }]
+}
+```
 
-| Type | Shape | MessageKind |
+## Типы `item` в `item/completed`
+
+| Type | Payload | MessageKind |
 |---|---|---|
-| `userMessage` | `{ content: [{ type: "text", text }] }` | (user role) |
-| `agentMessage` | `{ text }` | (assistant role) |
-| `reasoning` | `{ summary: string[], content: string[] }` | `"reasoning"` |
-| `commandExecution` | `{ command, aggregatedOutput, exitCode }` | `"command"` |
-| `fileChange` | `{ changes: [{ path, diff? }] }` | `"file"` |
-| `mcpToolCall` | `{ tool, result?, error? }` | `"mcp"` |
-| `webSearch` | `{ query }` | `"web"` |
-| `imageView` | `{ path?, imageUrl?, image_url?, mimeType?, mime_type?, width?, height?, bytes? }` | `"image"` |
-| `enteredReviewMode` | `{ review }` | `"review"` |
-| `exitedReviewMode` | `{ review }` | `"review"` |
-| `plan` | `{ text }` | `"plan"` |
-| `collabAgentToolCall` | `{ tool, status, receiverThreadIds, prompt }` | `"collab"` |
-| `contextCompaction` | `{}` | `"compaction"` |
+| `userMessage` | `{ content: [{ type: "text", text }] }` | user |
+| `agentMessage` | `{ text }` | assistant |
+| `reasoning` | `{ summary: string[], content: string[] }` | `reasoning` |
+| `commandExecution` | `{ command, aggregatedOutput, exitCode }` | `command` |
+| `fileChange` | `{ changes: [{ path, diff? }] }` | `file` |
+| `mcpToolCall` | `{ tool, result?, error? }` | `mcp` |
+| `webSearch` | `{ query }` | `web` |
+| `imageView` | `{ path?, imageUrl?, image_url?, mimeType?, mime_type?, width?, height?, bytes? }` | `image` |
+| `enteredReviewMode` | `{ review }` | `review` |
+| `exitedReviewMode` | `{ review }` | `review` |
+| `plan` | `{ text }` | `plan` |
+| `collabAgentToolCall` | `{ tool, status, receiverThreadIds, prompt }` | `collab` |
+| `contextCompaction` | `{}` | `compaction` |
 
-## Client Rendering Notes
+## Примечания по рендерингу клиента
 
-- **Reasoning** deltas are buffered, not streamed into the transcript. The first
-  `**bold**` chunk is extracted as the live "Working" detail. On `item/completed`,
-  a single collapsed reasoning block is emitted.
-- **Terminal interactions** with empty `stdin` show a shimmer "waiting" block.
-  Once input arrives the wait block is removed and stdin is appended to the
-  terminal transcript.
-- **Agent messages** strip `<proposed_plan>` tags before rendering (plan text is
-  delivered separately via the `plan` item type).
-- **Plan items** render as `PlanCard` components with an "Approve" action. On
-  approval the client sends a follow-up `turn/start` in code mode.
-- **Context compaction** renders as a subtle centered `↕ Context compacted`
-  divider (not a collapsible tool block).
-- **Collaboration mode** auto-syncs to `"plan"` when an unapproved plan item
-  exists, and resets to `"code"` when the user approves or manually toggles.
+- reasoning-дельты буферизуются и показываются как единый свернутый блок
+- пустой `stdin` в `terminalInteraction` трактуется как состояние ожидания
+- из `agentMessage` удаляются теги `<proposed_plan>`
+- plan-item рендерится отдельной карточкой с подтверждением
+- `contextCompaction` выводится как нейтральный разделитель
+- режим `collaborationMode` синхронизируется с состоянием утверждения плана

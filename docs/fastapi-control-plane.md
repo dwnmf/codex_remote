@@ -1,57 +1,91 @@
 # FastAPI Control Plane
 
-This guide describes the lightweight alternative to Cloudflare Orbit:
+Это облегчённая альтернатива Orbit (Cloudflare/Deno), если нужен простой self-host стек:
 
-- static frontend on Vercel (or any static host)
-- FastAPI backend for auth + websocket relay
-- Anchor on macOS/Linux/Windows
+- статический фронтенд на Vercel (или любом static host)
+- backend на FastAPI для auth + websocket relay
+- локальный Anchor на macOS/Linux/Windows
 
-## 1) Run the backend
+## Что реализовано
+
+- `GET /health`
+- `GET /auth/session`
+- `POST /auth/register/basic`
+- `POST /auth/login/basic`
+- `POST /auth/register/options` (режим `AUTH_MODE=passkey`)
+- `POST /auth/register/verify` (режим `AUTH_MODE=passkey`)
+- `POST /auth/login/options` (режим `AUTH_MODE=passkey`)
+- `POST /auth/login/verify` (режим `AUTH_MODE=passkey`)
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `POST /auth/device/code`
+- `POST /auth/device/authorise`
+- `POST /auth/device/token`
+- `POST /auth/device/refresh`
+- `GET /ws/client` и `GET /ws/anchor` preflight (`426` при валидной auth до апгрейда)
+- `WS /ws/client`
+- `WS /ws/anchor`
+
+Поведение realtime-части повторяет базовый Orbit-флоу:
+
+- `orbit.subscribe` / `orbit.unsubscribe`
+- `orbit.list-anchors`
+- `anchor.hello`, `orbit.anchor-connected`, `orbit.anchor-disconnected`
+- thread-scoped маршрутизация сообщений от Anchor к подписанным клиентам
+
+## Локальный запуск
 
 ```bash
 cd services/control-plane
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 pip install -r requirements.txt
-export AUTH_MODE=basic
-export CODEX_REMOTE_WEB_JWT_SECRET=change-me
-export CORS_ORIGINS=https://your-frontend.vercel.app,http://localhost:5173
-export DEVICE_VERIFICATION_URL=https://your-frontend.vercel.app/device
-# passkey mode only:
-# export AUTH_MODE=passkey
-# export PASSKEY_ORIGIN=https://your-frontend.vercel.app
-# export PASSKEY_RP_ID=your-frontend.vercel.app
 uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
-## 2) Build/deploy frontend
+## Переменные окружения
 
-Set frontend build env:
+Базовые:
+
+- `AUTH_MODE=passkey` или `AUTH_MODE=basic`
+- `CODEX_REMOTE_WEB_JWT_SECRET=change-me`
+- `DATABASE_PATH=./data/control_plane.db`
+- `CORS_ORIGINS=https://your-frontend.vercel.app,http://localhost:5173`
+- `DEVICE_VERIFICATION_URL=https://your-frontend.vercel.app/device`
+- `ACCESS_TTL_SEC=3600`
+- `REFRESH_TTL_SEC=604800`
+- `DEVICE_CODE_TTL_SEC=600`
+- `DEVICE_CODE_POLL_INTERVAL_SEC=5`
+- `ANCHOR_ACCESS_TTL_SEC=86400`
+- `ANCHOR_REFRESH_TTL_SEC=2592000`
+
+Для passkey-режима:
+
+- `PASSKEY_ORIGIN=https://your-frontend.vercel.app`
+- `PASSKEY_RP_ID=your-frontend.vercel.app` (опционально; можно вывести из origin)
+- `CHALLENGE_TTL_SEC=300`
+
+## Настройка фронтенда
+
+Для сборки web client задайте:
 
 - `AUTH_URL=https://<your-fastapi-domain>`
-- `AUTH_MODE=passkey` (recommended) or `AUTH_MODE=basic` (quick dev)
+- `AUTH_MODE=passkey` (рекомендуется) или `AUTH_MODE=basic` (быстрый dev)
 
-Then build and deploy as static site.
+## Настройка Anchor
 
-## 3) Run Anchor
-
-Set Anchor env:
+Для подключения Anchor к FastAPI relay:
 
 - `ANCHOR_ORBIT_URL=wss://<your-fastapi-domain>/ws/anchor`
 - `AUTH_URL=https://<your-fastapi-domain>`
 
-Run:
+Anchor получает device-токены через `/auth/device/token` и продлевает их через `/auth/device/refresh`.
 
-```bash
-codex-remote start
-```
+## Продакшен-заметки
 
-Anchor will use device code login and connect to FastAPI relay.
+- используйте сильные секреты
+- включайте только HTTPS/WSS
+- настройте строгие CORS origin’ы
+- контролируйте логи (в них не должны утекать токены/секреты)
 
-## Notes
-
-- In `AUTH_MODE=passkey`, frontend passkey login/register works via `/auth/*/options|verify`.
-- In `AUTH_MODE=basic`, frontend uses username-only flow for fast local testing.
-- Anchor device auth uses opaque access/refresh tokens (`/auth/device/token` + `/auth/device/refresh`), not shared signing secrets.
-- For production, use strong secrets and HTTPS/WSS only.
-- Full endpoint reference for this service is in [`services/control-plane/README.md`](../services/control-plane/README.md).
+Полный endpoint reference находится в [services/control-plane/README.md](../services/control-plane/README.md).

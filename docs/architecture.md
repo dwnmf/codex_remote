@@ -1,155 +1,153 @@
-# Architecture
+# Архитектура
 
-## High-Level Diagram
+## Верхнеуровневая схема
 
-```
-      Web Client (mobile)
+```text
+      Web Client (браузер)
               |
               | HTTPS + WebSocket
               v
-       Orbit (control plane)
+   Orbit / Control Plane (Cloudflare или Deno)
               |
-              | WebSocket relay (outbound from Mac)
+              | WebSocket relay (исходящее подключение с локальной машины)
               v
-   Anchor (local bridge, macOS)
+   Anchor (локальный bridge: macOS/Linux/Windows)
               |
               | JSON-RPC over stdio
               v
         codex app-server
 ```
 
-## Components
+## Компоненты
 
-### 1) Anchor (local bridge, macOS)
-Responsibilities:
-- Start and manage a `codex app-server` process.
-- Relay JSON-RPC messages between the web client and app-server.
-- Accept input/keystrokes from the remote client.
-- Handle approvals using app-server request/response flow.
-Process model:
-- Single `codex app-server` process with multiple threads (one per session).
+### 1) Anchor (локальный bridge)
 
-Tech:
-- Bun runtime.
-- JSON-RPC line protocol (JSONL over stdio).
-- JWT auth to connect to Orbit.
+Что делает:
 
-### 2) Orbit (control plane)
-Responsibilities:
-- Handle passkey authentication and issue JWTs for web clients.
-- Authenticate clients (via user JWT) and Anchor (via service JWT).
-- Create a Durable Object per user (`idFromName(userId)`). All threads for a user share one DO.
-- Relay WebSocket messages between Anchor and client, routed by thread subscription.
+- запускает и сопровождает процесс `codex app-server`
+- проксирует JSON-RPC между web client и `app-server`
+- отправляет ввод пользователя (в т.ч. интерактивный)
+- пересылает запросы на подтверждение действий
+- выполняет локальные helper-методы (`anchor.*`) для git/config/file/image/release операций
 
-Tech:
-- Cloudflare Workers + Durable Objects + D1.
-- WebAuthn for passkey auth.
+Технологии:
 
-### 3) Web Client (Mobile Web)
-Responsibilities:
-- Authenticate via passkeys.
-- Show list of threads and live output.
-- Send approvals and input.
-- Reconnect on network loss.
+- Bun runtime
+- JSONL/JSON-RPC по stdio
+- WebSocket к control plane
+- device access tokens (основной путь) + legacy JWT secret (обратная совместимость)
 
-Tech:
-- Bun + Vite + Svelte.
-- WebSocket client with reconnection logic.
-Hosting:
-- Static build deployed to Cloudflare Pages.
+### 2) Orbit / Control Plane
 
-## Data Flows
+Что делает:
 
-### A) Authentication
-1. Client registers/logs in via passkey at Orbit auth endpoints.
-2. Orbit returns a JWT (stored in localStorage).
-3. Client uses JWT to connect to Orbit.
+- аутентифицирует web client (passkey/TOTP; для FastAPI также basic-режим)
+- выпускает пользовательские токены и refresh токены
+- обслуживает device-code flow для Anchor
+- валидирует подключения `/ws/client` и `/ws/anchor`
+- маршрутизирует сообщения по `threadId` между Anchor и клиентами
 
-### B) Session (from Web Client)
-1. Client connects to Orbit WebSocket with JWT.
-2. Orbit verifies JWT and routes the socket to the user's Durable Object.
-3. Client sends `orbit.subscribe` with a `threadId` to receive events for that thread.
-4. Anchor connects to Orbit WebSocket with its own service JWT (same DO, same user).
-5. Client sends `thread/start` and `turn/start` JSON-RPC calls.
-6. DO forwards JSON-RPC to Anchor; Anchor relays to `codex app-server`.
-7. App-server notifications are routed back to clients subscribed to the thread.
+Провайдеры:
 
-### C) Approval Flow
-1. `codex app-server` emits `item/*/requestApproval` JSON-RPC request.
-2. Anchor forwards to client via WebSocket.
-3. Client responds with `{ "decision": "accept" | "decline" }`.
-4. Anchor forwards the decision to app-server.
+- `services/orbit`: Cloudflare Worker + Durable Objects + D1
+- `services/orbit-deno`: Deno Deploy runtime + Deno KV
+- `services/control-plane`: FastAPI-реализация для лёгкого self-host
 
-## Message Protocol (JSON over WebSocket)
+### 3) Web Client
 
-For MVP, Anchor relays `codex app-server` JSON-RPC messages directly over WebSocket.
-This avoids PTY parsing and provides structured events (command output, file diffs,
-approvals). The web client can use the generated schema from:
+Что делает:
 
-```
+- вход пользователя (passkey/TOTP/device authorisation)
+- список тредов, история и потоковые обновления
+- отправка команд, подтверждений и пользовательского ввода
+- автоматическое восстановление соединения
+
+Технологии:
+
+- Svelte + Vite
+- WebSocket с логикой переподключения
+- статический деплой (Cloudflare Pages, Deno Deploy, Vercel и др.)
+
+## Потоки данных
+
+### A) Вход пользователя
+
+1. Клиент вызывает auth endpoint’ы (`/auth/register/*`, `/auth/login/*`)
+2. Control plane возвращает `token` + `refreshToken`
+3. Клиент хранит токены и обновляет access token через `/auth/refresh`
+4. Для завершения сессии вызывается `/auth/logout`
+
+### B) Device login для Anchor
+
+1. Anchor запрашивает код через `POST /auth/device/code`
+2. Пользователь подтверждает код в браузере через `POST /auth/device/authorise`
+3. Anchor опрашивает `POST /auth/device/token`
+4. После авторизации Anchor получает `anchorAccessToken` + `anchorRefreshToken` (или legacy secret)
+5. При истечении Anchor обновляет токен через `POST /auth/device/refresh`
+
+### C) Рабочая сессия
+
+1. Web client подключается к `/ws/client?token=<jwt>`
+2. Anchor подключается к `/ws/anchor?token=<anchor-token>`
+3. Клиент подписывается на тред через `orbit.subscribe`
+4. RPC `thread/*` и `turn/*` идут через control plane в Anchor
+5. Anchor передаёт вызовы в `codex app-server`
+6. Нотификации и результаты возвращаются назад подписанным клиентам
+
+### D) Подтверждения
+
+1. `codex app-server` отправляет `item/*/requestApproval`
+2. Anchor/Orbit доставляют запрос в клиент
+3. Клиент отвечает JSON-RPC результатом с `decision`
+4. Ответ возвращается в `app-server`
+
+## Протокол сообщений
+
+Основной протокол - JSON-RPC-подобный формат поверх WebSocket.
+
+- Бизнес-сообщения: методы `thread/*`, `turn/*`, `item/*`
+- Control-frame Orbit: `orbit.hello`, `orbit.subscribe`, `orbit.unsubscribe`, `orbit.list-anchors`, `orbit.anchors`, `orbit.anchor-connected`, `orbit.anchor-disconnected`, `ping/pong`
+- Anchor metadata: `anchor.hello`
+
+TypeScript-схемы для клиентской интеграции можно генерировать через:
+
+```bash
 codex app-server generate-ts --out DIR
 ```
 
-Orbit adds its own control messages:
-- `orbit.hello` — sent to each socket on connect
-- `anchor.hello` — sent by Anchor with hostname/platform metadata
-- `orbit.subscribe` / `orbit.unsubscribe` — thread subscription management
-- `orbit.list-anchors` / `orbit.anchors` — connected device listing
-- `orbit.anchor-connected` / `orbit.anchor-disconnected` — device status notifications
-- `ping` / `pong` — WebSocket keepalives
+## HTTP/WS endpoint’ы
 
-## Orbit Endpoints
+### WebSocket
 
-### `GET /ws/client`
-WebSocket endpoint for the web client. Requires JWT with `codex-remote-web` audience.
+- `GET /ws/client` - сокет web client
+- `GET /ws/anchor` - сокет Anchor
 
-### `GET /ws/anchor`
-WebSocket endpoint for Anchor. Requires JWT with `codex-remote-orbit-anchor` audience.
+### Auth/API (общий набор)
 
-## Auth Endpoints (served by Orbit)
+- `GET /health`
+- `GET /auth/session`
+- `POST /auth/register/*`
+- `POST /auth/login/*`
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `POST /auth/device/code`
+- `POST /auth/device/token`
+- `POST /auth/device/authorise`
+- `POST /auth/device/refresh`
 
-### `GET /health`
-Health check.
+Примечание: точный набор `register/login` endpoint’ов зависит от провайдера и режима `AUTH_MODE`.
 
-### `GET /auth/session`
-Validate current JWT and return session info.
+## Состояние маршрутизации
 
-### `POST /auth/register/options`
-Start passkey registration (returns WebAuthn options).
+- Cloudflare-провайдер хранит состояние relay в Durable Object на пользователя
+- Deno/FastAPI-провайдеры реализуют эквивалентную маршрутизацию по `threadId`
+- Основная цель во всех вариантах: доставка сообщений только в релевантные подписанные сокеты
 
-### `POST /auth/register/verify`
-Complete passkey registration and return JWT.
+## Безопасность
 
-### `POST /auth/login/options`
-Start passkey login (returns WebAuthn challenge).
+- пользовательская аутентификация через passkey/TOTP (и basic в FastAPI-режиме)
+- access/refresh токены с серверной проверкой сессии и отзыва
+- отдельные токены/секреты для web и anchor контекстов
+- TLS для внешнего трафика
 
-### `POST /auth/login/verify`
-Complete passkey login and return JWT.
-
-### `POST /auth/logout`
-Revoke the current session.
-
-### `POST /auth/device/code`
-Request a device code for CLI authentication.
-
-### `POST /auth/device/token`
-Poll for a JWT after device code authorisation.
-
-### `POST /auth/device/authorise`
-Authorise a pending device code from the web client.
-
-## Durable Object State (per user)
-
-The `OrbitRelay` DO manages all sockets for a single user. Internal state:
-- `clientSockets` — map of client WebSockets to their subscribed thread IDs
-- `anchorSockets` — map of Anchor WebSockets to their subscribed thread IDs
-- `anchorMeta` — metadata (hostname, platform, connection time) per Anchor socket
-- `threadToClients` / `threadToAnchors` — reverse index for fast thread-scoped routing
-
-## Security
-- Passkey auth for users (WebAuthn).
-- JWT tokens for session management.
-- Separate secrets for user JWTs and Anchor service JWTs.
-- All traffic is TLS over Cloudflare.
-
-See `docs/auth.md` and `docs/security.md` for details.
+Детали см. в [auth.md](auth.md) и [security.md](security.md).

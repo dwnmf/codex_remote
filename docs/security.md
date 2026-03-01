@@ -1,80 +1,73 @@
-# Security
+# Безопасность
 
-## Threat Model
-- Unauthorized remote control of the local machine.
-- Session hijacking or replay via leaked JWT or refresh token.
-- Exposure of sensitive data in logs or prompts.
-- Abuse of the Anchor local API (if reachable beyond localhost).
+## Модель угроз
 
-## Baseline Controls
+- несанкционированный удалённый контроль локальной машины
+- перехват/повтор токенов сессии (access/refresh)
+- утечка чувствительных данных через логи или запросы к модели
+- злоупотребление локальным Anchor WebSocket/API
 
-### Authentication
-- Users authenticate via WebAuthn passkeys.
-- Orbit auth endpoints issue short-lived JWTs (1 hour) signed with `CODEX_REMOTE_WEB_JWT_SECRET` (issuer `codex-remote-auth`, audience `codex-remote-web`).
-- Refresh tokens (7 days) are issued alongside access JWTs. Only the SHA-256 hash is stored server-side.
-- Refresh token rotation: each refresh atomically revokes the old session and mints a new one, preventing replay.
-- The client auto-refreshes the access JWT 60 seconds before expiry.
-- `verifySession` checks the DB for `revoked_at` on every request, so server-side revocation is immediate.
-- Multiple users can register via passkeys.
+## Текущие меры защиты
 
-### Anchor Authentication
-- Anchor authenticates via a device code flow (`/auth/device/code` → `/auth/device/authorise` → `/auth/device/token`).
-- On successful device login, Orbit returns `CODEX_REMOTE_ANCHOR_JWT_SECRET` over HTTPS.
-- Anchor stores credentials in `~/.codex-remote/credentials.json` with `0600` permissions.
-- Anchor mints short-lived JWTs (5 minutes) signed with `CODEX_REMOTE_ANCHOR_JWT_SECRET` (issuer `codex-remote-anchor`, audience `codex-remote-orbit-anchor`).
-- Orbit validates both web and anchor token types based on audience and issuer.
+### Аутентификация пользователей
 
-### Transport
-- HTTPS/WSS via Cloudflare (TLS).
-- Anchor only opens outbound connections to Cloudflare.
+- поддерживаются passkey (WebAuthn), TOTP и basic-flow (в зависимости от провайдера/`AUTH_MODE`)
+- access token и refresh token выдаются раздельно
+- refresh-токены ротируются при обновлении сессии (`/auth/refresh`)
+- серверная проверка сессии позволяет отзывать токены через `/auth/logout`
 
-### Anchor Hardening
-- **BUG: The local HTTP API does not bind to `127.0.0.1`.** `Bun.serve()` has no `hostname` parameter, so it defaults to `0.0.0.0` (all interfaces).
-- **BUG: The local WebSocket (`/ws/anchor`) has no authentication.** Any process that can reach the port can connect and send commands.
+### Аутентификация Anchor
 
-### Session Safety
-- Three permission presets: Cautious (`on-request` + `read-only`), Standard (`on-request` + `workspace-write`), and Autonomous (`never` + `danger-full-access`).
-- Standard is the default — risky actions require user approval.
-- Autonomous mode disables all approval prompts.
-- Approval requests are exposed to the client in real time.
+- основной путь: device-code (`/auth/device/code` -> `/auth/device/authorise` -> `/auth/device/token`)
+- Anchor получает `anchorAccessToken` + `anchorRefreshToken` и обновляет через `/auth/device/refresh`
+- поддерживается legacy JWT secret flow для обратной совместимости
+- креды сохраняются в `~/.codex-remote/credentials.json` с правами `0600`
 
-### Logging & Persistence
-- Cloudflare Workers observability is enabled — `console.log` output goes to Cloudflare's logging infrastructure.
-- No application-level secret redaction is implemented.
-- Avoid sending environment variables or local file contents unless requested.
+### Защита локального Anchor WebSocket
 
-### Data Isolation
-- Orbit creates one Durable Object per `userId`.
-- Push notification subscriptions (endpoint, keys) are stored per user in D1.
+По умолчанию локальный сокет Anchor не открыт для произвольного внешнего доступа.
 
-### Security Headers
-- Static site: HSTS, `X-Frame-Options: DENY`, CSP with `frame-ancestors 'none'`, `Permissions-Policy` denying camera/mic/geo.
-- API responses: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`.
+- можно требовать явный токен через `ANCHOR_WS_TOKEN`
+- без токена разрешаются только loopback/private адреса
+- `ANCHOR_WS_ALLOW_PUBLIC=1` снимает ограничение (рискованный режим)
 
-### CORS
-- Orbit auth and relay endpoints validate origins against `PASSKEY_ORIGIN` / `ALLOWED_ORIGIN`.
-- `localhost` and `127.0.0.1` are always allowed regardless of the configured origin.
+### Транспорт
 
-## Known Limitations
-- JWT and refresh token leakage on the client device (both stored in `localStorage`).
-- JWTs sent in WebSocket query params may appear in server logs.
-- Logs may contain sensitive info if the user requests it.
-- No E2E encryption between client and Anchor (Cloudflare terminates TLS).
-- `~/.codex-remote/credentials.json` stores `CODEX_REMOTE_ANCHOR_JWT_SECRET` in plaintext.
-- `CODEX_REMOTE_ANCHOR_JWT_SECRET` is transmitted over HTTPS during device login — a single long-lived secret that lets the Anchor mint JWTs indefinitely.
-- No rate limiting on any endpoint (login, device code polls, refresh, WebSocket connections).
-- CORS always-allow-localhost could be a concern on shared machines.
-- Durable Object challenge store uses a single instance (`idFromName("default")`) for all concurrent auth operations.
+- внешний трафик идёт по HTTPS/WSS
+- Anchor инициирует исходящее подключение к control plane
+- входящие порты на локальной машине для Orbit не требуются
 
-## Planned Improvements
-- Bind Anchor local API to `127.0.0.1` and add authentication to the local WebSocket.
-- Optional E2E encryption using per-session keys.
-- Cloudflare Access policy for extra protection.
-- Rate limiting on auth and WebSocket endpoints.
-- Command allowlisting (sandbox modes exist but are delegated to Codex).
+### CORS и защитные заголовки (Orbit)
 
-## Operational Guidance
-- Rotate JWT secrets if any device is compromised.
-- Call `/auth/logout` to revoke sessions server-side.
-- Each user's Anchor connects with their own credentials. Do not share Anchor credentials across users.
-- Protect `~/.codex-remote/credentials.json` — it contains the Anchor JWT signing secret.
+- origin проверяется относительно `PASSKEY_ORIGIN` / `ALLOWED_ORIGIN`
+- `localhost` и `127.0.0.1` допускаются для dev-окружения
+- ответы Orbit включают `X-Content-Type-Options: nosniff` и `X-Frame-Options: DENY`
+
+## Изоляция данных
+
+- маршрутизация событий выполняется по `threadId` и подпискам сокетов
+- Cloudflare-провайдер использует Durable Object на пользователя
+- состояние сессий хранится на стороне backend (D1 или KV, в зависимости от провайдера)
+
+## Известные ограничения
+
+- web токены хранятся в `localStorage`; компрометация устройства компрометирует сессию
+- токены в query string WebSocket (`?token=`) потенциально могут попадать в инфраструктурные логи
+- нет сквозного E2E-шифрования между web client и Anchor (TLS завершается на edge/backend)
+- credentials-файл Anchor содержит чувствительные токены/секреты в plaintext
+- отдельный rate limiting для auth/ws endpoint’ов на уровне приложения не реализован
+- автоматическое разрешение localhost-origin удобно для dev, но требует осторожности на shared-машинах
+
+## Операционные рекомендации
+
+- регулярно ротируйте секреты (`CODEX_REMOTE_WEB_JWT_SECRET`, `CODEX_REMOTE_ANCHOR_JWT_SECRET` при legacy-flow)
+- используйте `codex-remote logout`/`/auth/logout` при смене устройства или подозрении на компрометацию
+- не включайте `ANCHOR_WS_ALLOW_PUBLIC=1` без необходимости
+- не храните в переписке с агентом секреты и приватные ключи
+- ограничивайте CORS origin’ы production-доменами
+
+## Что логично усилить дальше
+
+- добавить rate limiting на auth/device/ws endpoint’ы
+- внедрить опциональное E2E-шифрование полезной нагрузки между клиентом и Anchor
+- добавить централизованную маскировку секретов в логах

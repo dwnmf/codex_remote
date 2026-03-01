@@ -1,90 +1,101 @@
-# Self-Hosting
+# Self-hosting
 
-Codex Remote can be fully self-hosted with either `cloudflare` or `deno` provider. The `codex-remote self-host` wizard automates deployment for both.
+Codex Remote можно полностью развернуть в своём аккаунте с провайдером `cloudflare` или `deno`.
 
-## Prerequisites
+Команда `codex-remote self-host` запускает единый мастер деплоя для обоих вариантов.
 
-- **macOS/Linux/Windows** with [Bun](https://bun.sh) and [Codex CLI](https://github.com/openai/codex) installed
-- One provider account:
-  - **Cloudflare** (free tier is enough)
-  - **Deno Deploy** (free tier is enough)
-- **Codex Remote installed** via the [install script](installation.md)
+## Требования
 
-Provider runtimes used by the wizard:
-- `cloudflare`: [Wrangler](https://developers.cloudflare.com/workers/wrangler/) (installed or managed via Bun)
-- `deno`: `deployctl` (installed globally or run via `deno run -A jsr:@deno/deployctl`)
-  - authentication via `DENO_DEPLOY_TOKEN` (the wizard validates token access and can prompt for it)
-  - note: `deployctl` currently targets Deno Deploy Classic orgs
+- macOS/Linux/Windows
+- установленный [Bun](https://bun.sh)
+- установленный [Codex CLI](https://github.com/openai/codex)
+- установленный Codex Remote (см. [installation.md](installation.md))
+- аккаунт провайдера:
+  - Cloudflare (подходит free tier)
+  - Deno Deploy (подходит free tier)
 
-## What gets deployed
+Провайдерные инструменты:
 
-The wizard deploys:
+- `cloudflare`: `wrangler`
+- `deno`: `deployctl` (глобально или через `deno run -A jsr:@deno/deployctl`)
 
-| Service | Platform | Purpose |
-|---------|----------|---------|
-| **Orbit** | Cloudflare Worker + Durable Object or Deno Deploy runtime | Passkey auth, JWT issuance, WebSocket relay between devices and Anchor |
-| **Web** | Cloudflare Pages or Deno Deploy static assets | Static Svelte frontend |
+Для Deno нужен `DENO_DEPLOY_TOKEN`.
 
-For `cloudflare`, the wizard also creates/uses shared **D1**.
-For `deno`, auth/session state is stored in **Deno KV**.
+## Что деплоится
 
-Orbit uses generated JWT secrets for web/anchor flows. They are wired into provider deployment env automatically.
+| Сервис | Платформа | Назначение |
+|---|---|---|
+| Orbit / Control Plane | Cloudflare Worker + DO или Deno Deploy runtime | auth, выпуск токенов, websocket relay между web и Anchor |
+| Web | Cloudflare Pages или Deno Deploy static | статический Svelte frontend |
 
-## Running the wizard
+Хранилище состояния:
+
+- `cloudflare`: D1
+- `deno`: Deno KV
+
+JWT/служебные секреты генерируются мастером и автоматически прокидываются в окружение деплоя.
+
+## Запуск мастера
 
 ```bash
 codex-remote self-host --provider cloudflare
-# or:
+# или:
 codex-remote self-host --provider deno
-# force post-setup login:
+# принудительно выполнить login после настройки:
 codex-remote self-host --provider deno --login
 ```
 
-You can run this either:
+Мастер можно запустить:
 
-1. During `install.sh` or `install.ps1` when prompted, or
-2. Later from your terminal with `codex-remote self-host --provider ...`.
+1. во время `install.sh` / `install.ps1`, или
+2. позже вручную из терминала.
 
-The provider wizard flow:
+## Что делает мастер
 
-1. Validates local project files and required tools
-2. Checks Bun and provider tools (`wrangler` or `deployctl`)
-3. For `deno`, validates `DENO_DEPLOY_TOKEN` (from environment / `.env` / interactive prompt)
-4. Generates JWT and VAPID secrets
-5. Deploys Orbit backend
-6. Builds frontend with provider `AUTH_URL`
-7. Deploys static web
-8. Writes Anchor `.env` with provider-specific values
+1. Проверяет проект и локальные зависимости
+2. Проверяет инструменты провайдера (`wrangler`/`deployctl`)
+3. Для Deno проверяет `DENO_DEPLOY_TOKEN`
+4. Генерирует JWT/VAPID секреты
+5. Деплоит backend (Orbit/control-plane)
+6. Собирает frontend с корректным `AUTH_URL`
+7. Деплоит статический web
+8. Записывает значения в `.env` для Anchor
 
-At the end, it prints your deployment URLs and next steps.
-By default, `codex-remote self-host` then asks whether to run `codex-remote login`; use `--login` or `--no-login` to force behavior.
+В конце печатает URL и следующие шаги.
 
-## Failure behavior
+По умолчанию после деплоя спрашивает, запускать ли `codex-remote login`. Поведение можно зафиксировать флагами `--login`/`--no-login`.
 
-`codex-remote self-host` fails fast for critical deploy steps and exits non-zero on failure.
+## Поведение при ошибках
 
-If it fails, fix the reported issue and rerun `codex-remote self-host`. The flow is designed to be safely rerunnable.
+`codex-remote self-host` завершится с non-zero кодом, если критический этап не прошёл.
 
-## After deployment
+После исправления причины ошибку можно безопасно повторно прогнать ту же команду.
 
-1. Open your app URL (printed by the wizard) and create your account
-2. Run `codex-remote start` to connect your local Anchor to your self-hosted Orbit
+## После деплоя
 
-## Updating a self-hosted deployment
+1. Откройте URL приложения (из вывода мастера) и создайте/войдите в аккаунт
+2. Запустите `codex-remote start` для подключения локального Anchor
 
-`codex-remote update` redeploys web + orbit automatically for the selected provider (`SELF_HOST_PROVIDER` in `.env`).
-
-If `codex-remote update` fails, rerun after fixing prerequisites (for example provider auth), or redeploy manually:
+## Обновление self-host окружения
 
 ```bash
-# Cloudflare manual redeploy example
-# Redeploy orbit worker
+codex-remote update
+```
+
+Команда пере-деплоит web + backend для провайдера из `SELF_HOST_PROVIDER`.
+
+Если update не прошёл, исправьте окружение (например, auth у провайдера) и повторите.
+
+Пример ручного redeploy для Cloudflare:
+
+```bash
+# redeploy orbit
 (cd ~/.codex-remote/services/orbit && wrangler deploy)
 
-# Rebuild and redeploy web frontend
+# rebuild + deploy web
 (cd ~/.codex-remote && bun run build && wrangler pages deploy dist --project-name codex-remote)
 ```
 
-## Architecture
+## Архитектура
 
-See [architecture.md](architecture.md) for details on how the components communicate.
+Подробности взаимодействия компонентов: [architecture.md](architecture.md).

@@ -1,103 +1,121 @@
-# Auth Overview
+# Аутентификация: обзор
 
-This app uses passkeys and TOTP for user authentication, plus JWTs for service-to-service auth.
+Codex Remote использует комбинацию из passkey/TOTP/basic-входа (в зависимости от провайдера), refresh-токенов и device-code flow для Anchor.
 
-## Components
+## Компоненты
 
 - Web client (Svelte)
-- Orbit (Cloudflare Worker + Durable Object) for passkey auth and WS relay
-- Anchor (local Bun service) bridging Orbit to `codex app-server`
+- Orbit / control plane (`services/orbit`, `services/orbit-deno` или `services/control-plane`)
+- Anchor (локальный Bun-сервис, мост к `codex app-server`)
 
-## JWTs and secrets
+## Модель токенов и секретов
 
-Two separate secrets are used:
+### Пользовательская сессия (web)
 
-- `CODEX_REMOTE_WEB_JWT_SECRET` signs **user session** JWTs (issuer `codex-remote-auth`, audience `codex-remote-web`)
-- `CODEX_REMOTE_ANCHOR_JWT_SECRET` signs **Anchor** service JWTs (issuer `codex-remote-anchor`, audience `codex-remote-orbit-anchor`)
+- access token (`token`) используется для API/WS запросов
+- refresh token (`refreshToken`) обновляет сессию через `/auth/refresh`
+- access token короткоживущий, refresh token - долгоживущий с ротацией
 
-Orbit accepts either token depending on audience/issuer.
+### Anchor-сессия (device flow)
 
-User JWTs are also stored server-side in `auth_sessions` for revocation and expiry checks.
+- Anchor получает `anchorAccessToken` + `anchorRefreshToken` после device-code авторизации
+- access token обновляется через `/auth/device/refresh`
+- в legacy-сценариях может использоваться `CODEX_REMOTE_ANCHOR_JWT_SECRET`
 
-## Request flows
+### Секреты
 
-### Passkey login
+- `CODEX_REMOTE_WEB_JWT_SECRET` - подпись/проверка пользовательских JWT
+- `CODEX_REMOTE_ANCHOR_JWT_SECRET` - legacy service-to-service JWT для Anchor (и совместимость)
 
-1) Web client calls Orbit auth endpoints to register or sign in:
-   - `POST /auth/register/options` + `POST /auth/register/verify`
-   - `POST /auth/login/options` + `POST /auth/login/verify`
-2) Orbit returns a JWT and a refresh token, both signed with `CODEX_REMOTE_WEB_JWT_SECRET`.
-3) Client stores both tokens in `localStorage`.
-4) Orbit stores the session id (`jti`) in D1.
-5) When the JWT expires, the client calls `POST /auth/refresh` with the refresh token to get a new JWT and rotated refresh token.
+## Основные потоки
 
-### TOTP login and registration
+### 1) Вход через passkey
 
-1) Web client can register with TOTP:
-   - `POST /auth/register/totp/start`
-   - `POST /auth/register/totp/verify`
-2) Web client can sign in with TOTP:
-   - `POST /auth/login/totp`
-3) Optional setup for already signed-in users:
-   - `POST /auth/totp/setup/options`
-   - `POST /auth/totp/setup/verify`
-4) TOTP factors are stored in D1 (`totp_factors`) with replay protection (`last_used_step`).
+1. Клиент вызывает `POST /auth/register/options` + `POST /auth/register/verify` (регистрация) или `POST /auth/login/options` + `POST /auth/login/verify` (вход)
+2. Сервер выдаёт `token` + `refreshToken`
+3. Клиент хранит токены и обновляет `token` через `POST /auth/refresh`
+4. При выходе вызывается `POST /auth/logout`
 
-### Device code login (Anchor CLI)
+### 2) Вход через TOTP
 
-1) Anchor requests a device code via `POST /auth/device/code`.
-2) A user code is displayed in the terminal and a browser opens.
-3) User enters the code on the web client, which calls `POST /auth/device/authorise`.
-4) Anchor polls `POST /auth/device/token` until authorised, then receives a JWT.
-5) Credentials are saved to `CODEX_REMOTE_CREDENTIALS_FILE` (default: `~/.codex-remote/credentials.json`).
+Доступно в orbit/orbit-deno при `AUTH_MODE=passkey`:
 
-### Web client to Orbit
+- `POST /auth/register/totp/start`
+- `POST /auth/register/totp/verify`
+- `POST /auth/login/totp`
+- `POST /auth/totp/setup/options`
+- `POST /auth/totp/setup/verify`
 
-1) Client connects to Orbit WS using:
-   - `wss://.../ws/client?token=<jwt>`
-2) Orbit verifies the JWT (issuer `codex-remote-auth`, audience `codex-remote-web`).
+TOTP-факторы хранятся на сервере с защитой от replay (`last_used_step`).
 
-### Anchor to Orbit
+### 3) Basic login (только FastAPI и/или Deno в `AUTH_MODE=basic`)
 
-1) Anchor mints a short-lived JWT using `CODEX_REMOTE_ANCHOR_JWT_SECRET`.
-2) Anchor connects to:
-   - `wss://.../ws/anchor?token=<jwt>`
-3) Orbit verifies the JWT (issuer `codex-remote-anchor`, audience `codex-remote-orbit-anchor`).
+- `POST /auth/register/basic`
+- `POST /auth/login/basic`
 
-### Anchor to app-server
+Используется как упрощённый режим для локальной разработки и лёгкого self-host.
 
-1) Anchor spawns `codex app-server`.
-2) Anchor sends an `initialize` JSON-RPC request with:
-   - `cwd` (from `ANCHOR_APP_CWD`)
-   - `clientInfo`
+### 4) Device code для Anchor
 
-## Required configuration
+1. Anchor: `POST /auth/device/code`
+2. Пользователь подтверждает код в web: `POST /auth/device/authorise`
+3. Anchor polling: `POST /auth/device/token`
+4. После `authorised` Anchor получает anchor-токены
+5. Для продления сессии Anchor использует `POST /auth/device/refresh`
 
-Orbit auth:
-- `PASSKEY_ORIGIN`
+Креды Anchor сохраняются в `CODEX_REMOTE_CREDENTIALS_FILE` (по умолчанию `~/.codex-remote/credentials.json`).
+
+## WebSocket-аутентификация
+
+### Web client -> Orbit
+
+Подключение:
+
+- `wss://.../ws/client?token=<jwt>`
+- или заголовок `Authorization: Bearer <jwt>` (где применимо)
+
+Токен валидируется по issuer/audience и по состоянию серверной сессии.
+
+### Anchor -> Orbit
+
+Подключение:
+
+- `wss://.../ws/anchor?token=<anchorAccessToken>`
+
+В legacy-режиме Anchor может подписывать короткоживущий JWT через `CODEX_REMOTE_ANCHOR_JWT_SECRET`.
+
+## Обязательная конфигурация
+
+### Orbit / Orbit Deno
+
+- `PASSKEY_ORIGIN` (для passkey-режима)
 - `CODEX_REMOTE_WEB_JWT_SECRET`
+- `CODEX_REMOTE_ANCHOR_JWT_SECRET` (если нужен legacy flow)
 
-Orbit:
+### FastAPI control-plane
+
+- `AUTH_MODE=passkey|basic`
 - `CODEX_REMOTE_WEB_JWT_SECRET`
-- `CODEX_REMOTE_ANCHOR_JWT_SECRET` (required if Anchor connects remotely)
+- `DEVICE_VERIFICATION_URL`
+- `CORS_ORIGINS`
+- дополнительно для passkey: `PASSKEY_ORIGIN`, `PASSKEY_RP_ID`
 
-Anchor:
-- `CODEX_REMOTE_ANCHOR_JWT_SECRET`
+### Anchor
+
 - `ANCHOR_ORBIT_URL`
-- `ANCHOR_APP_CWD` (optional, defaults to `process.cwd()`)
+- `AUTH_URL`
+- опционально `CODEX_REMOTE_ANCHOR_JWT_SECRET` (legacy)
+- опционально `ANCHOR_APP_CWD`
 
-Client:
-- `AUTH_URL` (typically the same host as Orbit in self-host mode)
+## Типовые проблемы
 
-## Common issues
+- `Orbit unavailable`: неверный `AUTH_URL` или несовпадение origin (`PASSKEY_ORIGIN` / CORS)
+- `401/403` на `/ws/client` или `/ws/anchor`: недействительный/просроченный токен
+- ошибки `Not initialized`: `codex app-server` не прошёл `initialize`
+- неверные файлы проекта: неправильно задан `ANCHOR_APP_CWD`
 
-- `Orbit unavailable` in the client: `PASSKEY_ORIGIN` does not match your web origin, or `AUTH_URL` is incorrect.
-- `401` from Orbit WS: mismatched or missing JWT secret.
-- `Not initialized` JSON-RPC errors: app-server did not receive `initialize` or rejected params.
-- Wrong project files: `ANCHOR_APP_CWD` set to the wrong path.
+## Важные замечания
 
-## Security notes
-
-- JWTs are sent in WS query params for browser compatibility; they may appear in logs.
-- User JWTs live in `localStorage` and last 7 days; server-side revocation requires calling `/auth/logout`.
-- Multiple users can register. The first user sees a streamlined setup screen; subsequent users see the normal login/register page.
+- токены в query string (`?token=`) могут попадать в логи
+- при хранении токенов в `localStorage` безопасность устройства пользователя критична
+- серверная ротация refresh токенов и `logout` нужны для отзыва сессий
