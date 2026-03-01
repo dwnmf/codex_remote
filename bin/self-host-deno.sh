@@ -170,6 +170,11 @@ is_https_url() {
   [[ "$1" =~ ^https://[^[:space:]]+$ ]]
 }
 
+canonical_deno_url() {
+  local project_name="$1"
+  printf "https://%s.deno.dev" "${project_name,,}"
+}
+
 ensure_deploy_auth() {
   if [[ -n "${DENO_DEPLOY_TOKEN:-}" ]] && validate_deploy_token "$DENO_DEPLOY_TOKEN"; then
     pass "Deno Deploy authenticated"
@@ -245,29 +250,6 @@ deploy_deno() {
   (cd "$CODEX_REMOTE_HOME" && deployctl_tty "${args[@]}")
 }
 
-extract_deno_urls() {
-  grep -oE 'https://[^ ]+\.(deno\.dev|deno\.net)' | awk '!seen[$0]++' || true
-}
-
-select_canonical_deno_url() {
-  local project_name="$1"
-  local fallback_url="$2"
-  local urls="$3"
-  local project_url="https://${project_name,,}.deno.dev"
-
-  if echo "$urls" | grep -Fxq "$project_url"; then
-    printf "%s" "$project_url"
-    return 0
-  fi
-
-  if [[ -n "$fallback_url" ]] && echo "$urls" | grep -Fxq "$fallback_url"; then
-    printf "%s" "$fallback_url"
-    return 0
-  fi
-
-  printf "%s" "$urls" | head -1
-}
-
 step "0. Validating local setup"
 [[ -r /dev/tty ]] || abort "This wizard requires an interactive terminal."
 [[ -d "$CODEX_REMOTE_HOME" ]] || abort "CODEX_REMOTE_HOME not found: $CODEX_REMOTE_HOME"
@@ -288,7 +270,12 @@ read -r input_project < /dev/tty
 if [[ -n "${input_project// }" ]]; then
   project_name="${input_project// /}"
 fi
+project_name="${project_name,,}"
+[[ "$project_name" =~ ^[a-z0-9-]+$ ]] || abort "Invalid project name '$project_name'. Use lowercase letters, numbers, and dashes only."
+canonical_orbit_url="$(canonical_deno_url "$project_name")"
+is_https_url "$canonical_orbit_url" || abort "Failed to derive canonical Deno URL from project '$project_name'."
 pass "Project: $project_name"
+pass "Canonical URL: $canonical_orbit_url"
 
 step "3. Generating secrets"
 web_jwt_secret="$(read_env_value "DENO_WEB_JWT_SECRET")"
@@ -308,21 +295,13 @@ vapid_public_key=$(echo "$vapid_output" | grep '^VAPID_PUBLIC_KEY=' | cut -d= -f
 pass "JWT and VAPID secrets generated"
 
 step "4. Deploying backend (bootstrap)"
-if ! retry_capture 3 3 "Deno deploy" deploy_deno "$project_name" "https://example.com" "$web_jwt_secret" "$anchor_jwt_secret" "https://example.com" "0"; then
+if ! retry_capture 3 3 "Deno deploy" deploy_deno "$project_name" "$canonical_orbit_url" "$web_jwt_secret" "$anchor_jwt_secret" "$canonical_orbit_url" "0"; then
   echo "$RETRY_LAST_OUTPUT"
   abort "Initial Deno deployment failed."
 fi
 bootstrap_output="$RETRY_LAST_OUTPUT"
 echo "$bootstrap_output"
-
-bootstrap_urls="$(echo "$bootstrap_output" | extract_deno_urls)"
-orbit_url="$(select_canonical_deno_url "$project_name" "" "$bootstrap_urls")"
-if ! is_https_url "$orbit_url"; then
-  warn "Could not detect deployment URL from output."
-  printf "  Enter deployment URL (https://...): "
-  read -r orbit_url < /dev/tty
-fi
-is_https_url "$orbit_url" || abort "Invalid deployment URL."
+orbit_url="$canonical_orbit_url"
 pass "Backend URL: $orbit_url"
 
 step "5. Building web"
@@ -334,18 +313,13 @@ fi
 pass "Web build complete"
 
 step "6. Deploying backend + static web"
-if ! retry_capture 3 3 "Deno deploy (final)" deploy_deno "$project_name" "$orbit_url" "$web_jwt_secret" "$anchor_jwt_secret" "$orbit_url" "1"; then
+if ! retry_capture 3 3 "Deno deploy (final)" deploy_deno "$project_name" "$canonical_orbit_url" "$web_jwt_secret" "$anchor_jwt_secret" "$canonical_orbit_url" "1"; then
   echo "$RETRY_LAST_OUTPUT"
   abort "Final Deno deployment failed."
 fi
 final_output="$RETRY_LAST_OUTPUT"
 echo "$final_output"
-
-final_urls="$(echo "$final_output" | extract_deno_urls)"
-selected_final_url="$(select_canonical_deno_url "$project_name" "$orbit_url" "$final_urls")"
-if is_https_url "$selected_final_url"; then
-  orbit_url="$selected_final_url"
-fi
+orbit_url="$canonical_orbit_url"
 
 step "7. Configuring anchor"
 orbit_ws_url=$(echo "$orbit_url" | sed 's|^https://|wss://|')/ws/anchor

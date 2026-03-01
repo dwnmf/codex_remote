@@ -210,43 +210,10 @@ function Test-HttpsUrl([string]$Value) {
   return $Value -match "^https://\S+$"
 }
 
-function Extract-Urls([string]$Text) {
-  $matches = [regex]::Matches($Text, "https://[^\s]+\.(deno\.dev|deno\.net)")
-  $urls = New-Object System.Collections.Generic.List[string]
-  foreach ($match in $matches) {
-    $value = $match.Value.Trim()
-    if (-not $value) { continue }
-    if (-not $urls.Contains($value)) {
-      [void]$urls.Add($value)
-    }
-  }
-  return $urls.ToArray()
-}
-
-function Select-CanonicalDenoUrl([string[]]$Urls, [string]$ProjectName, [string]$Fallback = "") {
-  if (-not $Urls -or $Urls.Count -eq 0) {
-    return $Fallback
-  }
-
-  $normalizedProject = $ProjectName.Trim().ToLowerInvariant()
-  if ($normalizedProject) {
-    $projectUrl = "https://$normalizedProject.deno.dev"
-    foreach ($candidate in $Urls) {
-      if ($candidate.Trim().ToLowerInvariant() -eq $projectUrl) {
-        return $candidate
-      }
-    }
-  }
-
-  if ($Fallback) {
-    foreach ($candidate in $Urls) {
-      if ($candidate.Trim().ToLowerInvariant() -eq $Fallback.Trim().ToLowerInvariant()) {
-        return $candidate
-      }
-    }
-  }
-
-  return $Urls[0]
+function Get-CanonicalDenoUrl([string]$ProjectName) {
+  $normalized = $ProjectName.Trim().ToLowerInvariant()
+  if (-not $normalized) { return "" }
+  return "https://$normalized.deno.dev"
 }
 
 Write-Step "0. Validating local setup"
@@ -263,7 +230,16 @@ Write-Step "2. Preparing project"
 $projectName = "codex-remote"
 $projectInput = (Read-Host "Deno Deploy project name [$projectName]").Trim()
 if ($projectInput) { $projectName = $projectInput }
+$projectName = ($projectName -replace "\s+", "").Trim().ToLowerInvariant()
+if (-not ($projectName -match "^[a-z0-9-]+$")) {
+  Abort "Invalid project name '$projectName'. Use lowercase letters, numbers, and dashes only."
+}
+$canonicalOrbitUrl = Get-CanonicalDenoUrl $projectName
+if (-not (Test-HttpsUrl $canonicalOrbitUrl)) {
+  Abort "Failed to derive canonical Deno URL from project '$projectName'."
+}
 Write-Pass "Project: $projectName"
+Write-Pass "Canonical URL: $canonicalOrbitUrl"
 
 Write-Step "3. Generating secrets"
 $webSecret = (Get-EnvValue "DENO_WEB_JWT_SECRET").Trim()
@@ -281,12 +257,9 @@ $vapidPublic = Generate-VapidPublicKey
 Write-Pass "JWT and VAPID secrets generated"
 
 Write-Step "4. Deploying backend (bootstrap)"
-$bootstrapOutput = Deploy-Deno -Project $projectName -AuthUrl "https://example.com" -WebSecret $webSecret -AnchorSecret $anchorSecret -PasskeyOrigin "https://example.com" -IncludeDist:$false
+$bootstrapOutput = Deploy-Deno -Project $projectName -AuthUrl $canonicalOrbitUrl -WebSecret $webSecret -AnchorSecret $anchorSecret -PasskeyOrigin $canonicalOrbitUrl -IncludeDist:$false
 Write-Host $bootstrapOutput
-$bootstrapUrls = Extract-Urls $bootstrapOutput
-$orbitUrl = Select-CanonicalDenoUrl -Urls $bootstrapUrls -ProjectName $projectName
-if (-not (Test-HttpsUrl $orbitUrl)) { $orbitUrl = (Read-Host "Enter deployment URL (https://...)").Trim() }
-if (-not (Test-HttpsUrl $orbitUrl)) { Abort "Invalid deployment URL." }
+$orbitUrl = $canonicalOrbitUrl
 Write-Pass "Backend URL: $orbitUrl"
 
 Write-Step "5. Building web"
@@ -306,11 +279,9 @@ finally {
 Write-Pass "Web build complete"
 
 Write-Step "6. Deploying backend + static web"
-$finalOutput = Deploy-Deno -Project $projectName -AuthUrl $orbitUrl -WebSecret $webSecret -AnchorSecret $anchorSecret -PasskeyOrigin $orbitUrl -IncludeDist:$true
+$finalOutput = Deploy-Deno -Project $projectName -AuthUrl $canonicalOrbitUrl -WebSecret $webSecret -AnchorSecret $anchorSecret -PasskeyOrigin $canonicalOrbitUrl -IncludeDist:$true
 Write-Host $finalOutput
-$finalUrls = Extract-Urls $finalOutput
-$selectedFinalUrl = Select-CanonicalDenoUrl -Urls $finalUrls -ProjectName $projectName -Fallback $orbitUrl
-if (Test-HttpsUrl $selectedFinalUrl) { $orbitUrl = $selectedFinalUrl }
+$orbitUrl = $canonicalOrbitUrl
 
 Write-Step "7. Configuring anchor"
 $orbitWsUrl = ($orbitUrl -replace "^https://", "wss://") + "/ws/anchor"

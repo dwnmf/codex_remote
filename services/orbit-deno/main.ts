@@ -9,6 +9,18 @@ const settings = loadSettings();
 const kv = await Deno.openKv();
 const store = new KvStore(kv, settings);
 const relayManager = new RelayManager();
+const CANONICAL_ORIGIN = settings.passkeyOrigin.trim();
+
+function buildCanonicalUrl(reqUrl: URL): string | null {
+  if (!CANONICAL_ORIGIN) return null;
+  try {
+    const canonical = new URL(CANONICAL_ORIGIN);
+    if (reqUrl.host.toLowerCase() === canonical.host.toLowerCase()) return null;
+    return `${canonical.origin}${reqUrl.pathname}${reqUrl.search}`;
+  } catch {
+    return null;
+  }
+}
 
 Deno.serve(async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
@@ -19,6 +31,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       status: 200,
       headers: { "content-type": "application/json; charset=utf-8" },
     });
+  }
+
+  const canonicalUrl = buildCanonicalUrl(url);
+  if (canonicalUrl && !pathname.startsWith("/ws/")) {
+    if (req.method === "GET" || req.method === "HEAD") {
+      return Response.redirect(canonicalUrl, 307);
+    }
+    return textResponse(`Use canonical URL: ${canonicalUrl}`, 421);
   }
 
   if (pathname === "/ws/client" || pathname === "/ws/anchor") {
