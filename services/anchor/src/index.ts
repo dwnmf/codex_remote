@@ -14,7 +14,7 @@ const ORBIT_URL = process.env.ANCHOR_ORBIT_URL ?? "";
 const ANCHOR_JWT_TTL_SEC = Number(process.env.ANCHOR_JWT_TTL_SEC ?? 300);
 const AUTH_URL = process.env.AUTH_URL ?? "";
 const FORCE_LOGIN = process.env.CODEX_REMOTE_FORCE_LOGIN === "1";
-const CREDENTIALS_FILE = process.env.CODEX_REMOTE_CREDENTIALS_FILE ?? "";
+const CREDENTIALS_FILE = (process.env.CODEX_REMOTE_CREDENTIALS_FILE ?? "").trim() || join(homedir(), ".codex-remote", "credentials.json");
 const ANCHOR_WS_TOKEN = (process.env.ANCHOR_WS_TOKEN ?? "").trim();
 const ANCHOR_WS_ALLOW_PUBLIC = process.env.ANCHOR_WS_ALLOW_PUBLIC === "1";
 const startedAt = Date.now();
@@ -1766,7 +1766,7 @@ async function streamLines(
 }
 
 interface Credentials {
-  userId: string;
+  userId?: string;
   anchorId?: string;
   anchorJwtSecret?: string;
   anchorAccessToken?: string;
@@ -1779,11 +1779,11 @@ async function loadCredentials(): Promise<Credentials | null> {
   try {
     const text = await Bun.file(CREDENTIALS_FILE).text();
     const data = JSON.parse(text) as Partial<Credentials>;
-    if (!data.userId) return null;
+    const userId = typeof data.userId === "string" && data.userId.trim() ? data.userId : undefined;
 
     if (data.anchorAccessToken && data.anchorRefreshToken) {
       return {
-        userId: data.userId,
+        userId,
         anchorId: typeof data.anchorId === "string" ? data.anchorId : undefined,
         anchorAccessToken: data.anchorAccessToken,
         anchorRefreshToken: data.anchorRefreshToken,
@@ -1793,9 +1793,9 @@ async function loadCredentials(): Promise<Credentials | null> {
       };
     }
 
-    if (data.anchorJwtSecret) {
+    if (data.anchorJwtSecret && userId) {
       return {
-        userId: data.userId,
+        userId,
         anchorId: typeof data.anchorId === "string" ? data.anchorId : undefined,
         anchorJwtSecret: data.anchorJwtSecret,
       };
@@ -1828,9 +1828,12 @@ function tryOpenBrowser(url: string): void {
 async function saveCredentials(creds: Credentials): Promise<void> {
   if (!CREDENTIALS_FILE) return;
   try {
+    await mkdir(dirname(CREDENTIALS_FILE), { recursive: true });
     await Bun.write(CREDENTIALS_FILE, JSON.stringify(creds, null, 2) + "\n");
-    const { chmod } = await import("node:fs/promises");
-    await chmod(CREDENTIALS_FILE, 0o600);
+    if (process.platform !== "win32") {
+      const { chmod } = await import("node:fs/promises");
+      await chmod(CREDENTIALS_FILE, 0o600);
+    }
   } catch (err) {
     console.warn("[anchor] could not save credentials", err);
   }
@@ -2128,7 +2131,9 @@ async function startup() {
     ANCHOR_ACCESS_TOKEN = saved.anchorAccessToken ?? "";
     ANCHOR_REFRESH_TOKEN = saved.anchorRefreshToken ?? "";
     ANCHOR_ACCESS_EXPIRES_AT_MS = saved.anchorAccessExpiresAtMs ?? 0;
-    USER_ID = saved.userId;
+    if (saved.userId) {
+      USER_ID = saved.userId;
+    }
     ANCHOR_ID = saved.anchorId ?? "";
   }
 
@@ -2147,8 +2152,8 @@ async function startup() {
   }
 
   const hasDeviceTokens = Boolean(ANCHOR_ACCESS_TOKEN && ANCHOR_REFRESH_TOKEN);
-  const hasLegacySecret = Boolean(CODEX_REMOTE_ANCHOR_JWT_SECRET);
-  const needsLogin = ORBIT_URL && (FORCE_LOGIN || !USER_ID || (!hasDeviceTokens && !hasLegacySecret));
+  const hasLegacySecret = Boolean(CODEX_REMOTE_ANCHOR_JWT_SECRET && USER_ID);
+  const needsLogin = ORBIT_URL && (FORCE_LOGIN || (!hasDeviceTokens && !hasLegacySecret));
 
   console.log(`\nCodex Remote Anchor`);
   console.log(`  Local:     http://localhost:${server.port}`);
