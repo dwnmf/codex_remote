@@ -169,4 +169,34 @@ describe("socket rpc helpers", () => {
     expect(status.releaseId).toBe("release-1");
     socket.disconnect();
   });
+
+  test("sends git diff and git log graph RPC methods", async () => {
+    const { socket } = await loadFreshSocketModule();
+    socket.connect("ws://localhost:8788/ws/client");
+    const ws = FakeWebSocket.instances[0];
+    ws.open();
+
+    const diffPromise = socket.gitDiff("/repo", "src/main.ts");
+    const diffRequest = JSON.parse(ws.sent[0]) as { id: string; method: string; params: { path: string } };
+    expect(diffRequest.method).toBe("anchor.git.diff");
+    expect(diffRequest.params.path).toBe("src/main.ts");
+    ws.emitMessage({
+      id: diffRequest.id,
+      result: { repoRoot: "/repo", path: "src/main.ts", diff: "diff --git a/src/main.ts b/src/main.ts" },
+    });
+    const diff = await diffPromise;
+    expect(diff.path).toBe("src/main.ts");
+
+    const graphPromise = socket.gitLogGraph("/repo", 25);
+    const graphRequest = JSON.parse(ws.sent[1]) as { id: string; method: string; params: { limit: number } };
+    expect(graphRequest.method).toBe("anchor.git.logGraph");
+    expect(graphRequest.params.limit).toBe(25);
+    ws.emitMessage({
+      id: graphRequest.id,
+      result: { repoRoot: "/repo", graph: "* abc123 test", truncated: false },
+    });
+    const graph = await graphPromise;
+    expect(graph.graph).toContain("abc123");
+    socket.disconnect();
+  });
 });

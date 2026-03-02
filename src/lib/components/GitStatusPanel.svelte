@@ -31,6 +31,22 @@
   let pushAfterCommit = $state(false);
   let actionMessage = $state<string | null>(null);
 
+  let activeView = $state<"changes" | "history">("changes");
+
+  let selectedDiffPath = $state<string | null>(null);
+  let diffText = $state("");
+  let diffLoading = $state(false);
+  let diffError = $state<string | null>(null);
+  let diffIsBinary = $state(false);
+  let diffTooLarge = $state(false);
+  let diffRequestId = 0;
+
+  let graphText = $state("");
+  let graphLoading = $state(false);
+  let graphError = $state<string | null>(null);
+  let graphTruncated = $state(false);
+  let graphRequestId = 0;
+
   let initialAutoLoadedPath = "";
   let lastAutoRefreshSignature = "";
   let autoRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -87,6 +103,12 @@
     scheduleAutoRefresh(220);
   });
 
+  $effect(() => {
+    if (activeView !== "history") return;
+    if (graphText || graphLoading) return;
+    void loadGitGraph({ silent: true });
+  });
+
   function syncSelection(entries: GitStatusResult["entries"]) {
     if (entries.length === 0) {
       selectedPaths = new Set();
@@ -113,6 +135,18 @@
     selectedPaths = next;
   }
 
+  function syncDiffSelection(entries: GitStatusResult["entries"]) {
+    if (!selectedDiffPath) return;
+    const stillExists = entries.some((entry) => entry.path === selectedDiffPath);
+    if (stillExists) return;
+    selectedDiffPath = null;
+    diffText = "";
+    diffError = null;
+    diffLoading = false;
+    diffIsBinary = false;
+    diffTooLarge = false;
+  }
+
   async function refreshStatus(options?: { silent?: boolean; keepActionMessage?: boolean }): Promise<void> {
     const silent = options?.silent === true;
     const keepActionMessage = options?.keepActionMessage === true;
@@ -135,9 +169,15 @@
     try {
       status = await socket.gitStatus(repoPath.trim(), anchorId);
       syncSelection(status.entries);
+      syncDiffSelection(status.entries);
       const repoRoot = status.repoRoot.trim();
       if (repoRoot && onResolvedRepoPath) {
         onResolvedRepoPath(repoRoot);
+      }
+      if (activeView === "history") {
+        void loadGitGraph({ silent: true, repoRoot });
+      } else if (selectedDiffPath && status.entries.some((entry) => entry.path === selectedDiffPath)) {
+        void loadFileDiff(selectedDiffPath, { silent: true, repoRoot });
       }
       if (!silent) {
         error = null;
@@ -148,6 +188,89 @@
       error = err instanceof Error ? err.message : "Failed to read git status.";
     } finally {
       loading = false;
+    }
+  }
+
+  async function ensureRepoRoot(): Promise<string | null> {
+    const resolved = status?.repoRoot?.trim();
+    if (resolved) return resolved;
+    await refreshStatus({ silent: true, keepActionMessage: true });
+    return status?.repoRoot?.trim() || null;
+  }
+
+  async function loadFileDiff(path: string, options?: { silent?: boolean; repoRoot?: string }): Promise<void> {
+    const silent = options?.silent === true;
+    const repoRoot = options?.repoRoot?.trim() || status?.repoRoot?.trim();
+    if (!repoRoot) {
+      if (!silent) error = "Refresh status first to resolve repository root.";
+      return;
+    }
+
+    selectedDiffPath = path;
+    diffLoading = true;
+    if (!silent) {
+      error = null;
+      diffError = null;
+    }
+    const requestId = ++diffRequestId;
+
+    try {
+      const result = await socket.gitDiff(repoRoot, path, anchorId);
+      if (requestId !== diffRequestId) return;
+      diffText = result.diff || "";
+      diffError = null;
+      diffIsBinary = Boolean(result.isBinary);
+      diffTooLarge = Boolean(result.tooLarge);
+    } catch (err) {
+      if (requestId !== diffRequestId) return;
+      diffText = "";
+      diffIsBinary = false;
+      diffTooLarge = false;
+      diffError = err instanceof Error ? err.message : "Failed to load file diff.";
+    } finally {
+      if (requestId === diffRequestId) {
+        diffLoading = false;
+      }
+    }
+  }
+
+  async function loadGitGraph(options?: { silent?: boolean; repoRoot?: string }): Promise<void> {
+    const silent = options?.silent === true;
+    const repoRoot = options?.repoRoot?.trim() || await ensureRepoRoot();
+    if (!repoRoot) {
+      if (!silent) error = "Refresh status first to resolve repository root.";
+      return;
+    }
+
+    graphLoading = true;
+    if (!silent) {
+      error = null;
+      graphError = null;
+    }
+    const requestId = ++graphRequestId;
+
+    try {
+      const result = await socket.gitLogGraph(repoRoot, 300, anchorId);
+      if (requestId !== graphRequestId) return;
+      graphText = result.graph || "";
+      graphError = null;
+      graphTruncated = result.truncated;
+    } catch (err) {
+      if (requestId !== graphRequestId) return;
+      graphText = "";
+      graphTruncated = false;
+      graphError = err instanceof Error ? err.message : "Failed to load git graph.";
+    } finally {
+      if (requestId === graphRequestId) {
+        graphLoading = false;
+      }
+    }
+  }
+
+  function setView(nextView: "changes" | "history") {
+    activeView = nextView;
+    if (nextView === "history") {
+      void loadGitGraph({ silent: true });
     }
   }
 
@@ -350,68 +473,126 @@
       <span class="chip">selected {selectedCount}</span>
     </div>
 
-    {#if status.entries.length > 0}
-      <div class="selection-toolbar row">
-        <label class="select-all row">
-          <input
-            type="checkbox"
-            checked={allSelected}
-            onchange={(e) => setAllSelected((e.currentTarget as HTMLInputElement).checked)}
-            disabled={isBusy}
-          />
-          <span>Select all</span>
-        </label>
-        <button type="button" class="mini-btn danger" onclick={() => void revertSelected()} disabled={isBusy || selectedCount === 0}>
-          Revert selected
-        </button>
-        <button type="button" class="mini-btn danger" onclick={() => void revertAll()} disabled={isBusy}>
-          Revert all
-        </button>
-      </div>
+    <div class="view-tabs row">
+      <button type="button" class="tab-btn" class:active={activeView === "changes"} onclick={() => setView("changes")}>
+        Changes
+      </button>
+      <button type="button" class="tab-btn" class:active={activeView === "history"} onclick={() => setView("history")}>
+        History
+      </button>
+    </div>
 
-      <div class="entries">
-        {#each status.entries as entry (entry.path + entry.rawStatus)}
-          <div class="entry row">
-            <label class="entry-select row">
-              <input
-                type="checkbox"
-                checked={selectedPaths.has(entry.path)}
-                onchange={(e) => setPathSelected(entry.path, (e.currentTarget as HTMLInputElement).checked)}
-                disabled={isBusy}
-              />
-            </label>
-            <span class="entry-status">{entry.rawStatus}</span>
-            <span class="entry-path">{entry.path}</span>
-            <button type="button" class="entry-revert-btn" onclick={() => void revertSingle(entry.path)} disabled={isBusy}>
-              Revert
-            </button>
-          </div>
-        {/each}
-      </div>
-
-      <div class="actions stack">
-        <input
-          class="commit-input"
-          type="text"
-          placeholder="Commit message"
-          bind:value={commitMessage}
-          onkeydown={(e) => {
-            if (e.key === "Enter" && !commitBusy) void commitSelected();
-          }}
-        />
-        <label class="push-after row">
-          <input type="checkbox" bind:checked={pushAfterCommit} disabled={isBusy} />
-          <span>Push after commit</span>
-        </label>
-        <div class="row action-buttons">
-          <button type="button" class="action-btn" onclick={() => void commitSelected()} disabled={isBusy || selectedCount === 0}>
-            {commitBusy ? "Committing..." : "Commit Selected"}
+    {#if activeView === "changes"}
+      {#if status.entries.length > 0}
+        <div class="selection-toolbar row">
+          <label class="select-all row">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onchange={(e) => setAllSelected((e.currentTarget as HTMLInputElement).checked)}
+              disabled={isBusy}
+            />
+            <span>Select all</span>
+          </label>
+          <button type="button" class="mini-btn danger" onclick={() => void revertSelected()} disabled={isBusy || selectedCount === 0}>
+            Revert selected
           </button>
-          <button type="button" class="action-btn" onclick={() => void pushChanges()} disabled={isBusy}>
-            {pushBusy ? "Pushing..." : "Push"}
+          <button type="button" class="mini-btn danger" onclick={() => void revertAll()} disabled={isBusy}>
+            Revert all
           </button>
         </div>
+
+        <div class="entries">
+          {#each status.entries as entry (entry.path + entry.rawStatus)}
+            <div class="entry row" class:diff-active={selectedDiffPath === entry.path}>
+              <label class="entry-select row">
+                <input
+                  type="checkbox"
+                  checked={selectedPaths.has(entry.path)}
+                  onchange={(e) => setPathSelected(entry.path, (e.currentTarget as HTMLInputElement).checked)}
+                  disabled={isBusy}
+                />
+              </label>
+              <span class="entry-status">{entry.rawStatus}</span>
+              <span class="entry-path">{entry.path}</span>
+              <div class="entry-actions row">
+                <button type="button" class="entry-diff-btn" onclick={() => void loadFileDiff(entry.path)} disabled={isBusy}>
+                  Diff
+                </button>
+                <button type="button" class="entry-revert-btn" onclick={() => void revertSingle(entry.path)} disabled={isBusy}>
+                  Revert
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+
+        <div class="diff-preview stack">
+          <div class="diff-preview-head row">
+            <span class="chip">{selectedDiffPath ? selectedDiffPath : "select file for diff"}</span>
+            {#if diffIsBinary}
+              <span class="chip">binary</span>
+            {/if}
+            {#if diffTooLarge}
+              <span class="chip">truncated</span>
+            {/if}
+          </div>
+          {#if diffLoading}
+            <p class="hint">Loading diff...</p>
+          {:else if diffError}
+            <p class="hint hint-error">{diffError}</p>
+          {:else if selectedDiffPath}
+            <pre class="diff-output">{diffText || "No diff payload for this path."}</pre>
+          {:else}
+            <p class="hint">Pick a file and press Diff to preview changes.</p>
+          {/if}
+        </div>
+
+        <div class="actions stack">
+          <input
+            class="commit-input"
+            type="text"
+            placeholder="Commit message"
+            bind:value={commitMessage}
+            onkeydown={(e) => {
+              if (e.key === "Enter" && !commitBusy) void commitSelected();
+            }}
+          />
+          <label class="push-after row">
+            <input type="checkbox" bind:checked={pushAfterCommit} disabled={isBusy} />
+            <span>Push after commit</span>
+          </label>
+          <div class="row action-buttons">
+            <button type="button" class="action-btn" onclick={() => void commitSelected()} disabled={isBusy || selectedCount === 0}>
+              {commitBusy ? "Committing..." : "Commit Selected"}
+            </button>
+            <button type="button" class="action-btn" onclick={() => void pushChanges()} disabled={isBusy}>
+              {pushBusy ? "Pushing..." : "Push"}
+            </button>
+          </div>
+        </div>
+      {:else}
+        <p class="hint">No local changes in this repository.</p>
+      {/if}
+    {:else}
+      <div class="history-toolbar row">
+        <button type="button" class="mini-btn" onclick={() => void loadGitGraph()} disabled={graphLoading}>
+          {graphLoading ? "Loading..." : "Reload graph"}
+        </button>
       </div>
+
+      {#if graphLoading && !graphText}
+        <p class="hint">Loading git graph...</p>
+      {:else if graphError}
+        <p class="hint hint-error">{graphError}</p>
+      {:else if !graphText}
+        <p class="hint">No commits yet.</p>
+      {:else}
+        <pre class="graph-output">{graphText}</pre>
+        {#if graphTruncated}
+          <p class="hint">Graph output truncated to latest commits.</p>
+        {/if}
+      {/if}
     {/if}
   {/if}
 
@@ -470,6 +651,7 @@
   .refresh-btn,
   .action-btn,
   .mini-btn,
+  .entry-diff-btn,
   .entry-revert-btn {
     padding: var(--space-xs) var(--space-sm);
     background: transparent;
@@ -486,6 +668,7 @@
   .refresh-btn:hover:enabled,
   .action-btn:hover:enabled,
   .mini-btn:hover:enabled,
+  .entry-diff-btn:hover:enabled,
   .entry-revert-btn:hover:enabled {
     border-color: var(--cli-prefix-agent);
     background: color-mix(in srgb, var(--cli-prefix-agent) 10%, transparent);
@@ -500,6 +683,7 @@
   .refresh-btn:disabled,
   .action-btn:disabled,
   .mini-btn:disabled,
+  .entry-diff-btn:disabled,
   .entry-revert-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
@@ -524,6 +708,29 @@
   .status-line {
     --row-gap: var(--space-xs);
     flex-wrap: wrap;
+  }
+
+  .view-tabs {
+    --row-gap: var(--space-xs);
+  }
+
+  .tab-btn {
+    padding: 0.28rem 0.55rem;
+    border: 1px solid color-mix(in srgb, var(--cli-border) 72%, transparent);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--cli-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+  }
+
+  .tab-btn.active {
+    color: var(--cli-text);
+    border-color: var(--cli-prefix-agent);
+    background: color-mix(in srgb, var(--cli-prefix-agent) 12%, transparent);
   }
 
   .chip {
@@ -564,6 +771,10 @@
     align-items: center;
   }
 
+  .entry.diff-active {
+    background: color-mix(in srgb, var(--cli-prefix-agent) 7%, transparent);
+  }
+
   .entry:last-child {
     border-bottom: none;
   }
@@ -588,8 +799,46 @@
     flex: 1;
   }
 
+  .entry-actions {
+    --row-gap: var(--space-xs);
+    flex-shrink: 0;
+  }
+
   .entry-revert-btn {
     flex-shrink: 0;
+  }
+
+  .diff-preview {
+    --stack-gap: var(--space-xs);
+    border: 1px solid color-mix(in srgb, var(--cli-border) 60%, transparent);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--cli-bg) 80%, transparent);
+    padding: var(--space-sm);
+  }
+
+  .diff-preview-head {
+    --row-gap: var(--space-xs);
+    flex-wrap: wrap;
+  }
+
+  .history-toolbar {
+    --row-gap: var(--space-xs);
+  }
+
+  .diff-output,
+  .graph-output {
+    margin: 0;
+    max-height: 320px;
+    overflow: auto;
+    border: 1px solid color-mix(in srgb, var(--cli-border) 56%, transparent);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--cli-bg-elevated) 72%, transparent);
+    padding: var(--space-sm);
+    color: var(--cli-text);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.45;
+    white-space: pre;
   }
 
   .actions {

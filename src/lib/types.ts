@@ -247,6 +247,20 @@ export interface GitStatusResult {
   entries: GitStatusEntry[];
 }
 
+export interface GitDiffResult {
+  repoRoot: string;
+  path: string;
+  diff: string;
+  isBinary?: boolean;
+  tooLarge?: boolean;
+}
+
+export interface GitLogGraphResult {
+  repoRoot: string;
+  graph: string;
+  truncated: boolean;
+}
+
 export interface GitCommitResult {
   committed: boolean;
   output: string;

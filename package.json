@@ -9,7 +9,7 @@
     "lint": "bunx eslint .",
     "typecheck": "bunx tsc -p tsconfig.json --noEmit && bunx tsc -p services/anchor/tsconfig.json --noEmit && bunx tsc -p services/orbit/tsconfig.json --noEmit",
     "test": "bun test src/lib/**/*.test.ts && python -m pytest -q services/control-plane/tests && bun --cwd services/orbit test",
-    "ci:local": "bun run lint && bun run typecheck && bun run test && bun run build",
+    "ci:local": "bun run lint && bun run typecheck && bun run test && bun --env-file .env.example run build",
     "preview": "bunx --bun vite preview --port 4173",
     "deploy": "bun run build && bunx wrangler pages deploy dist --project-name codex-remote --branch main",
     "migrate": "bunx wrangler d1 migrations apply codex-remote --remote",

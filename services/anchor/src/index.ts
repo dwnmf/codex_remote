@@ -44,6 +44,9 @@ let warnedNoAppServer = false;
 let appServerInitialized = false;
 const MAX_IMAGE_READ_BYTES = 20 * 1024 * 1024;
 const MAX_FILE_READ_BYTES = 512 * 1024;
+const MAX_GIT_DIFF_CHARS = 350_000;
+const DEFAULT_GIT_LOG_GRAPH_LIMIT = 300;
+const MAX_GIT_LOG_GRAPH_LIMIT = 2000;
 
 // Buffer pending approval requests from app-server so we can re-send them
 // when a client (re)subscribes to a thread via orbit.
@@ -440,6 +443,20 @@ function getParamStringArray(params: JsonObject | null, key: string): string[] {
   return parsed;
 }
 
+function getOptionalPositiveInt(params: JsonObject | null, key: string): number | null {
+  const value = params?.[key];
+  if (value == null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${key} must be a number`);
+  }
+
+  const normalized = Math.floor(value);
+  if (normalized < 1) {
+    throw new Error(`${key} must be greater than 0`);
+  }
+  return normalized;
+}
+
 function resolveRepoRelativePath(repoRoot: string, rawPath: string): { absolute: string; relativePath: string } {
   const absolute = isAbsolute(rawPath)
     ? normalizeAbsolutePath(rawPath)
@@ -766,6 +783,12 @@ async function maybeHandleAnchorLocalRpc(message: JsonObject): Promise<JsonObjec
   }
   if (message.method === "anchor.git.status") {
     return handleGitStatus(id, params);
+  }
+  if (message.method === "anchor.git.diff") {
+    return handleGitDiff(id, params);
+  }
+  if (message.method === "anchor.git.logGraph") {
+    return handleGitLogGraph(id, params);
   }
   if (message.method === "anchor.git.worktree.list") {
     return handleGitWorktreeList(id, params);
@@ -1114,6 +1137,25 @@ function parseGitStatusPorcelain(porcelain: string): GitStatusEntry[] {
   return entries;
 }
 
+function clampGitLogLimit(limit: number | null): number {
+  if (!limit) return DEFAULT_GIT_LOG_GRAPH_LIMIT;
+  return Math.max(1, Math.min(MAX_GIT_LOG_GRAPH_LIMIT, limit));
+}
+
+function detectBinaryDiffText(diff: string): boolean {
+  return /Binary files .* differ|GIT binary patch/i.test(diff);
+}
+
+function truncateDiffText(diff: string): { diff: string; tooLarge: boolean } {
+  if (diff.length <= MAX_GIT_DIFF_CHARS) {
+    return { diff, tooLarge: false };
+  }
+
+  const omittedChars = diff.length - MAX_GIT_DIFF_CHARS;
+  const truncated = `${diff.slice(0, MAX_GIT_DIFF_CHARS)}\n\n... diff truncated (${omittedChars} chars omitted) ...`;
+  return { diff: truncated, tooLarge: true };
+}
+
 async function handleGitStatus(id: number | string, params: JsonObject | null): Promise<JsonObject> {
   try {
     const path = ensureAbsolutePath(getParamString(params, "path"), "path");
@@ -1143,6 +1185,136 @@ async function handleGitStatus(id: number | string, params: JsonObject | null): 
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to read git status";
+    return { id, error: { code: -1, message } };
+  }
+}
+
+async function handleGitDiff(id: number | string, params: JsonObject | null): Promise<JsonObject> {
+  try {
+    const repoRoot = ensureAbsolutePath(getParamString(params, "repoRoot"), "repoRoot");
+    const resolvedRepoRoot = await resolveRepoRoot(repoRoot);
+    if (!resolvedRepoRoot) {
+      return { id, error: { code: -1, message: "repoRoot is not a git repository" } };
+    }
+
+    const rawPath = getParamString(params, "path");
+    const { absolute, relativePath } = resolveRepoRelativePath(resolvedRepoRoot, rawPath);
+
+    const trackedCheck = await runGitCommand([
+      "-C",
+      resolvedRepoRoot,
+      "ls-files",
+      "--error-unmatch",
+      "--",
+      relativePath,
+    ]);
+
+    const diffParts: string[] = [];
+    if (trackedCheck.ok) {
+      const unstaged = await runGitCommand(["-C", resolvedRepoRoot, "diff", "--no-color", "--", relativePath]);
+      if (!unstaged.ok) {
+        const output = [unstaged.stderr, unstaged.stdout].filter(Boolean).join("\n").trim();
+        return { id, error: { code: unstaged.code || -1, message: output || "Failed to read file diff" } };
+      }
+      if (unstaged.stdout) diffParts.push(unstaged.stdout);
+
+      const staged = await runGitCommand(["-C", resolvedRepoRoot, "diff", "--no-color", "--cached", "--", relativePath]);
+      if (!staged.ok) {
+        const output = [staged.stderr, staged.stdout].filter(Boolean).join("\n").trim();
+        return { id, error: { code: staged.code || -1, message: output || "Failed to read staged file diff" } };
+      }
+      if (staged.stdout) diffParts.push(staged.stdout);
+    } else {
+      const noIndex = await runGitCommand([
+        "-C",
+        resolvedRepoRoot,
+        "diff",
+        "--no-color",
+        "--no-index",
+        "--",
+        "/dev/null",
+        relativePath,
+      ]);
+
+      if ((noIndex.ok || noIndex.code === 1) && noIndex.stdout) {
+        diffParts.push(noIndex.stdout);
+      } else {
+        const file = Bun.file(absolute);
+        if (await file.exists()) {
+          diffParts.push(`Untracked file: ${relativePath}\nStage this file to view git-formatted diff.`);
+        }
+      }
+    }
+
+    const rawDiff = diffParts.join("\n\n").trim();
+    const normalizedDiff = rawDiff || "No diff payload for this path.";
+    const { diff, tooLarge } = truncateDiffText(normalizedDiff);
+
+    return {
+      id,
+      result: {
+        repoRoot: resolvedRepoRoot,
+        path: relativePath,
+        diff,
+        isBinary: detectBinaryDiffText(rawDiff),
+        tooLarge,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to read git diff";
+    return { id, error: { code: -1, message } };
+  }
+}
+
+async function handleGitLogGraph(id: number | string, params: JsonObject | null): Promise<JsonObject> {
+  try {
+    const repoRoot = ensureAbsolutePath(getParamString(params, "repoRoot"), "repoRoot");
+    const resolvedRepoRoot = await resolveRepoRoot(repoRoot);
+    if (!resolvedRepoRoot) {
+      return { id, error: { code: -1, message: "repoRoot is not a git repository" } };
+    }
+
+    const requestedLimit = getOptionalPositiveInt(params, "limit");
+    const limit = clampGitLogLimit(requestedLimit);
+    const includeAll = params?.all !== false;
+    const probeLimit = Math.min(limit + 1, MAX_GIT_LOG_GRAPH_LIMIT + 1);
+
+    const args = ["-C", resolvedRepoRoot, "log", "--graph", "--oneline", "--decorate"];
+    if (includeAll) args.push("--all");
+    args.push("-n", String(probeLimit));
+
+    const logResult = await runGitCommand(args);
+    if (!logResult.ok) {
+      const output = [logResult.stderr, logResult.stdout].filter(Boolean).join("\n").trim();
+      if (/does not have any commits yet|your current branch .+ does not have any commits yet/i.test(output)) {
+        return {
+          id,
+          result: {
+            repoRoot: resolvedRepoRoot,
+            graph: "",
+            truncated: false,
+          },
+        };
+      }
+      return { id, error: { code: logResult.code || -1, message: output || "Failed to read git graph" } };
+    }
+
+    const lines = logResult.stdout
+      ? logResult.stdout.split("\n").map((line) => line.trimEnd()).filter(Boolean)
+      : [];
+    const truncated = lines.length > limit || (requestedLimit != null && requestedLimit > MAX_GIT_LOG_GRAPH_LIMIT);
+    const graph = lines.slice(0, limit).join("\n");
+
+    return {
+      id,
+      result: {
+        repoRoot: resolvedRepoRoot,
+        graph,
+        truncated,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to read git graph";
     return { id, error: { code: -1, message } };
   }
 }

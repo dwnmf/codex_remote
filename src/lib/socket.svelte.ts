@@ -2,7 +2,9 @@ import type {
   AnchorFileReadResult,
   ConnectionStatus,
   GitCommitResult,
+  GitDiffResult,
   GitInspectResult,
+  GitLogGraphResult,
   GitPushResult,
   GitRevertResult,
   GitStatusResult,
@@ -321,6 +323,31 @@ class SocketStore {
         ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
       },
       "git-status",
+    );
+  }
+
+  gitDiff(repoRoot: string, path: string, anchorId?: string): Promise<GitDiffResult> {
+    return this.#requestRpc<GitDiffResult>(
+      "anchor.git.diff",
+      {
+        repoRoot,
+        path,
+        ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+      },
+      "git-diff",
+    );
+  }
+
+  gitLogGraph(repoRoot: string, limit = 300, anchorId?: string): Promise<GitLogGraphResult> {
+    return this.#requestRpc<GitLogGraphResult>(
+      "anchor.git.logGraph",
+      {
+        repoRoot,
+        limit,
+        all: true,
+        ...(anchorId?.trim() ? { anchorId: anchorId.trim() } : {}),
+      },
+      "git-log-graph",
     );
   }
 

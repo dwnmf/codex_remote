@@ -79,6 +79,8 @@ JSON-RPC response на конкретный `id`:
 | `anchor.listDirs` | `{ path?, startPath? }` | `{ dirs, parent, current, roots }` |
 | `anchor.git.inspect` | `{ path }` | `{ isGitRepo, repoRoot?, currentBranch? }` |
 | `anchor.git.status` | `{ path }` | `{ repoRoot, branch, clean, entries[] }` |
+| `anchor.git.diff` | `{ repoRoot, path }` | `{ repoRoot, path, diff, isBinary?, tooLarge? }` |
+| `anchor.git.logGraph` | `{ repoRoot, limit?, all? }` | `{ repoRoot, graph, truncated }` |
 | `anchor.git.worktree.list` | `{ repoRoot }` | `{ repoRoot, mainPath, worktrees[] }` |
 | `anchor.git.worktree.create` | `{ repoRoot, baseRef?, branchName?, path?, rootDir? }` | `{ repoRoot, path, branch, head }` |
 | `anchor.git.worktree.remove` | `{ repoRoot, path, force? }` | `{ removed }` |
